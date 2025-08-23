@@ -34,11 +34,32 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 - UI & Auth: Grafana OSS + custom Ops Console (React) + Keycloak
 - Deploy: k3s + Argo CD; Harbor registry cache (opt)
 
-## Getting Started (Docs-first)
+## Getting Started (v1.0 Available)
 1. Clone the repo.
 2. Read docs/architecture.md to understand the edge+core design.
-3. Review docs/roadmap.md and open issues for the next milestone you want to tackle.
-4. Coming soon: docker-compose and Helm charts for v0.1 bootstrap on a test node.
+3. Review docs/roadmap.md for implementation status and milestones.
+4. **NEW: v1.0 Self-Learning Closed-Loop Automation is now implemented!**
+   - See `src/v1.0/` for the complete implementation
+   - Configuration files in `configs/v1.0/`
+   - Kubernetes deployment manifests in `deployments/v1.0/`
+   - Run tests with `python tests/v1.0/test_simple.py`
+
+### v1.0 Quick Start
+```bash
+# Run component tests
+python tests/v1.0/test_simple.py
+
+# Deploy to Kubernetes
+kubectl apply -f deployments/v1.0/orchestrator.yaml
+
+# Or run locally (requires Python 3.8+)
+cd src/v1.0
+python -c "
+from auto_remediation.confidence_engine import ConfidenceEngine
+engine = ConfidenceEngine('../../configs/v1.0/remediation_scenarios.json')
+print('v1.0 Confidence Engine loaded successfully!')
+"
+```
 
 ## Contributing
 PRs welcome. Please discuss substantial changes via issues first. Follow conventional commits if possible.

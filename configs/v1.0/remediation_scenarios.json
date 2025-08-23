@@ -1,0 +1,44 @@
+{
+  "scenarios": [
+    {
+      "scenario_id": "satellite_failover",
+      "name": "Satellite Link Failover",
+      "description": "Automatic failover to backup satellite link on primary failure",
+      "success_rate": 0.92,
+      "execution_count": 45,
+      "risk_level": "medium",
+      "prerequisites": ["backup_link_available", "signal_quality_check"],
+      "rollback_available": true
+    },
+    {
+      "scenario_id": "bandwidth_throttling", 
+      "name": "Emergency Bandwidth Throttling",
+      "description": "Reduce non-critical traffic during link degradation",
+      "success_rate": 0.88,
+      "execution_count": 78,
+      "risk_level": "low",
+      "prerequisites": ["traffic_classification"],
+      "rollback_available": true
+    },
+    {
+      "scenario_id": "service_restart",
+      "name": "Critical Service Restart",
+      "description": "Restart unresponsive critical services",
+      "success_rate": 0.85,
+      "execution_count": 120,
+      "risk_level": "medium",
+      "prerequisites": ["health_check_failed", "backup_available"],
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "route_optimization",
+      "name": "Network Route Optimization",
+      "description": "Optimize network routes based on current conditions",
+      "success_rate": 0.95,
+      "execution_count": 156,
+      "risk_level": "low", 
+      "prerequisites": ["topology_available"],
+      "rollback_available": true
+    }
+  ]
+}
