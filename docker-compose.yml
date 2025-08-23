@@ -83,7 +83,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
-      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=grafana-clickhouse-datasource
+      - GF_PLUGIN_BACKGROUNDINSTALLER_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -184,6 +184,44 @@ services:
       - clickhouse
     restart: unless-stopped
 
+  # VMAlert - Alert manager for VictoriaMetrics
+  vmalert:
+    image: victoriametrics/vmalert:latest
+    container_name: aiops-vmalert
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./alerts/system-alerts.yml:/etc/alerts/alerts.yml:ro
+    command:
+      - --rule=/etc/alerts/alerts.yml
+      - --datasource.url=http://victoria-metrics:8428
+      - --notifier.url=http://alertmanager:9093
+      - --httpListenAddr=:8880
+      - --evaluationInterval=30s
+      - --external.url=http://localhost:8880
+    depends_on:
+      - victoria-metrics
+      - alertmanager
+    restart: unless-stopped
+
+  # Alertmanager - Handle alerts and route to MailHog
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: aiops-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alerts/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:9093
+      - --cluster.listen-address=
+    depends_on:
+      - mailhog
+    restart: unless-stopped
+
 volumes:
   clickhouse_data:
   vm_data:
@@ -193,3 +231,4 @@ volumes:
   ollama_data:
   nats_data:
   vector_data:
+  alertmanager_data:

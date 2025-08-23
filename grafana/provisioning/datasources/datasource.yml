@@ -12,15 +12,3 @@ datasources:
       timeInterval: "15s"
       httpMethod: POST
     version: 1
-
-  - name: ClickHouse HTTP
-    type: prometheus
-    uid: clickhouse
-    url: http://clickhouse:8123
-    access: proxy
-    isDefault: false
-    editable: true
-    jsonData:
-      timeInterval: "30s"
-      httpMethod: GET
-    version: 1

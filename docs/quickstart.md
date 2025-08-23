@@ -51,6 +51,8 @@ The stack includes the following services:
 | **NATS** | 4222/8222 | Message bus | http://localhost:8222 |
 | **MailHog** | 8025/1025 | Email testing | http://localhost:8025 |
 | **Node Exporter** | 9100 | System metrics | http://localhost:9100/metrics |
+| **VMAlert** | 8880 | Alert evaluation | http://localhost:8880 |
+| **Alertmanager** | 9093 | Alert routing | http://localhost:9093 |
 | **Vector** | - | Log processing | Logs to docker compose logs vector |
 
 ## Step-by-Step Verification
@@ -151,55 +153,54 @@ SELECT count(*) as total_logs,
 FROM logs.raw;
 ```
 
-## Alerting Demo (VictoriaMetrics → MailHog)
+## Alerting Demo (VMAlert → Alertmanager → MailHog)
 
-### Create a High CPU Alert
+The stack includes a complete alerting pipeline that monitors system metrics and sends alerts to MailHog for testing.
 
-1. Create `alerts/cpu-alert.yml`:
+### Pre-configured Alerts
 
-```yaml
-groups:
-  - name: system_alerts
-    rules:
-      - alert: HighCPUUsage
-        expr: 100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
-        for: 2m
-        labels:
-          severity: warning
-          service: monitoring
-        annotations:
-          summary: "High CPU usage detected on {{ $labels.instance }}"
-          description: "CPU usage is above 80% for more than 2 minutes. Current usage: {{ $value }}%"
-```
+The system includes several built-in alerts:
 
-2. Configure vmalert (add to docker-compose.yml):
+1. **High CPU Usage** - Triggers when CPU > 80% for 2+ minutes
+2. **High Memory Usage** - Triggers when memory > 90% for 5+ minutes  
+3. **Low Disk Space** - Triggers when disk usage > 85% for 10+ minutes
+4. **Service Down** - Triggers when any monitored service is unreachable
 
-```yaml
-  vmalert:
-    image: victoriametrics/vmalert:latest
-    command:
-      - --rule=/etc/alerts/cpu-alert.yml
-      - --datasource.url=http://victoria-metrics:8428
-      - --notifier.url=http://mailhog:1025
-      - --remoteWrite.url=http://victoria-metrics:8428
-    volumes:
-      - ./alerts:/etc/alerts:ro
-    depends_on:
-      - victoria-metrics
-      - mailhog
-```
+### View Active Alerts
 
-3. Restart the stack:
+1. **VMAlert Web UI**: http://localhost:8880
+   - Shows alert rules and their current status
+   - View firing/pending alerts
+
+2. **Alertmanager Web UI**: http://localhost:9093
+   - Shows active alerts and alert routing
+   - Manage alert silences
+
+### Test Alert Generation
+
+To trigger a high CPU alert for demonstration:
+
 ```bash
-docker compose up -d
+# Generate CPU load (run in background)
+docker run --rm -d --name cpu-stress alpine/stress:latest --cpu 2 --timeout 300
+
+# Watch VMAlert for firing alerts
+curl http://localhost:8880/api/v1/alerts
+
+# Check MailHog for alert emails
+open http://localhost:8025
 ```
 
-4. Generate high CPU load to trigger the alert:
-```bash
-docker run --rm -it --name cpu-stress alpine/stress:latest --cpu 4 --timeout 300
-```
+**Screenshot placeholder**: *VMAlert showing firing CPU alert*
+**Screenshot placeholder**: *MailHog showing alert email received*
 
-5. Check MailHog at http://localhost:8025 for alert notifications
+### Alert Configuration
+
+- **Alert Rules**: `alerts/system-alerts.yml` - Define when alerts fire
+- **Alert Routing**: `alerts/alertmanager.yml` - Configure email delivery to MailHog
+- **SMTP Config**: Uses MailHog at `localhost:1025` (no authentication required)
+
+The alerts will be sent to `ops@cruise.local` with detailed information about the issue.
 
 ## Troubleshooting
 

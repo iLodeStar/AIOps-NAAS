@@ -42,6 +42,8 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 ## Local Bootstrap
 Get started quickly with the complete local development environment:
 - **[Quickstart Guide](docs/quickstart.md)** - Docker Compose stack for v0.1 MVP testing
+- **Stack includes**: ClickHouse, VictoriaMetrics, Grafana, Ollama, Qdrant, NATS, MailHog, Vector, VMAlert, Alertmanager
+- **One command setup**: `docker compose up -d` brings up the full observability stack
 
 ## Contributing
 PRs welcome. Please discuss substantial changes via issues first. Follow conventional commits if possible.
