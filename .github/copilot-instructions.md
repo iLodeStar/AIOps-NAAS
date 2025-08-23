@@ -125,6 +125,34 @@ Based on the planned architecture, expect these patterns:
 4. **Search existing docs**: Use `grep -r` to find relevant information
 5. **Focus on design**: This is a planning repository, contribute to architecture/design
 
+## Network Access Requirements
+
+When implementing the planned technology stack, ensure firewall/network access to:
+
+### Container Registries
+- **Docker Hub** (hub.docker.com) - For base images and official containers
+- **Quay.io** (quay.io) - For RedHat/CoreOS containers
+- **GitHub Container Registry** (ghcr.io) - For GitHub-hosted containers
+
+### Package Repositories  
+- **PyPI** (pypi.org) - For Python packages (LangChain, LlamaIndex, etc.)
+- **NPM Registry** (registry.npmjs.org) - For React/JavaScript dependencies
+- **Go Modules** (proxy.golang.org) - For Go dependencies
+- **Helm Charts** (charts.helm.sh) - For Kubernetes deployments
+
+### Technology Stack Sites
+- **ClickHouse** (clickhouse.com) - Documentation and packages
+- **VictoriaMetrics** (victoriametrics.com) - Documentation and releases
+- **Grafana** (grafana.com) - Plugins and documentation
+- **Prometheus** (prometheus.io) - Documentation and tools
+- **NATS** (nats.io) - Documentation and releases
+- **Qdrant** (qdrant.tech) - Vector database documentation
+- **k3s/Rancher** (rancher.com, k3s.io) - Lightweight Kubernetes
+
+### Development Resources
+- **GitHub** (github.com, api.github.com) - Source code and API access
+- **Ollama** (ollama.ai) - Local LLM models and documentation
+
 ## Future Development Guidance
 
 When actual code is added to this repository:
