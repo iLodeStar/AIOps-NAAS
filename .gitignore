@@ -1,0 +1,95 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.log
+*.bak
+.idea/
+.vscode/
+*.code-workspace
+
+# Node / Frontend
+node_modules/
+.pnpm-store/
+.yarn/
+.yarn-cache/
+.npm/
+.npmrc
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.dist/
+dist/
+build/
+.cache/
+.next/
+.out/
+.turbo/
+.parcel-cache/
+coverage/
+coverage-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.coverage*
+htmlcov/
+
+# Go
+bin/
+obj/
+*.test
+coverage.out
+
+# Java / JVM
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.gradle/
+.build/
+.target/
+
+# Rust
+target/
+
+# Docker / Containers
+.docker/
+Dockerfile.local
+*.tar
+
+# Terraform
+.terraform/
+terraform.tfstate*
+crash.log
+*.tfvars
+
+# Kubernetes
+*.kubeconfig
+
+# Logs & dumps
+logs/
+*.log*
+*.gz
+*.zip
+*.dump
+
+# Misc
+*.sqlite*
+*.db
+
+# Generated docs/artifacts
+site/
