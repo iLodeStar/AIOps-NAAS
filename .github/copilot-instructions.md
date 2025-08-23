@@ -2,6 +2,12 @@
 
 **ALWAYS** follow these instructions first and only fall back to additional search and context gathering if the information in these instructions is incomplete or found to be in error.
 
+## ⚠️ FIREWALL ACCESS REQUIRED
+
+**CRITICAL**: Many technology stack sites are currently BLOCKED by firewall. Repository administrators must add blocked domains to the [Copilot allowlist](https://github.com/iLodeStar/AIOps-NAAS/settings/copilot/coding_agent) before implementing planned components. See [Network Access Requirements](#network-access-requirements) section below for complete list of blocked domains.
+
+Sites like `clickhouse.com`, `grafana.com`, `prometheus.io`, `nats.io`, `qdrant.tech`, `ollama.ai`, and 15+ others are currently inaccessible and will cause failures during implementation.
+
 ## Current Repository State (CRITICAL)
 
 **This is currently a design-stage repository with no buildable code.** The repository contains only documentation and architectural designs for a future Cruise AIOps Platform.
@@ -127,31 +133,79 @@ Based on the planned architecture, expect these patterns:
 
 ## Network Access Requirements
 
-When implementing the planned technology stack, ensure firewall/network access to:
+### Currently Accessible (No Action Required)
+These sites are already accessible and do not need firewall configuration:
+- **Docker Hub** (hub.docker.com, registry-1.docker.io) - Container images ✓
+- **Quay.io** (quay.io) - RedHat/CoreOS containers ✓
+- **GitHub Container Registry** (ghcr.io) - GitHub-hosted containers ✓
+- **PyPI** (pypi.org) - Python packages ✓
+- **NPM Registry** (registry.npmjs.org) - JavaScript dependencies ✓
+- **Go Modules** (proxy.golang.org) - Go dependencies ✓
+- **GitHub** (github.com, api.github.com) - Source code and API access ✓
 
-### Container Registries
-- **Docker Hub** (hub.docker.com) - For base images and official containers
-- **Quay.io** (quay.io) - For RedHat/CoreOS containers
-- **GitHub Container Registry** (ghcr.io) - For GitHub-hosted containers
+### **BLOCKED - Require Firewall Allowlist Configuration**
 
-### Package Repositories  
-- **PyPI** (pypi.org) - For Python packages (LangChain, LlamaIndex, etc.)
-- **NPM Registry** (registry.npmjs.org) - For React/JavaScript dependencies
-- **Go Modules** (proxy.golang.org) - For Go dependencies
-- **Helm Charts** (charts.helm.sh) - For Kubernetes deployments
+**CRITICAL**: The following sites are currently blocked and **MUST** be added to the [Copilot coding agent allowlist](https://github.com/iLodeStar/AIOps-NAAS/settings/copilot/coding_agent) before implementing the planned technology stack:
 
-### Technology Stack Sites
-- **ClickHouse** (clickhouse.com) - Documentation and packages
-- **VictoriaMetrics** (victoriametrics.com) - Documentation and releases
-- **Grafana** (grafana.com) - Plugins and documentation
-- **Prometheus** (prometheus.io) - Documentation and tools
-- **NATS** (nats.io) - Documentation and releases
-- **Qdrant** (qdrant.tech) - Vector database documentation
-- **k3s/Rancher** (rancher.com, k3s.io) - Lightweight Kubernetes
+#### Essential Technology Stack Sites
+- **clickhouse.com** - ClickHouse database documentation and packages
+- **victoriametrics.com** - VictoriaMetrics time-series database
+- **grafana.com** - Grafana dashboards, plugins, and documentation
+- **prometheus.io** - Prometheus monitoring documentation and tools
+- **nats.io** - NATS messaging system documentation
+- **qdrant.tech** - Vector database for RAG/LLM functionality
+- **k3s.io** - Lightweight Kubernetes distribution
+- **rancher.com** - Container management platform
+- **ollama.ai** - Local LLM models and documentation
 
-### Development Resources
-- **GitHub** (github.com, api.github.com) - Source code and API access
-- **Ollama** (ollama.ai) - Local LLM models and documentation
+#### Stream Processing & Observability
+- **vector.dev** - Vector log/metrics router
+- **fluentbit.io** - Fluent Bit log processor
+- **opentelemetry.io** - OpenTelemetry tracing framework
+- **jaegertracing.io** - Jaeger distributed tracing
+- **benthos.dev** - Benthos stream processing
+
+#### ML/AI/Automation Stack  
+- **langchain.com** - LangChain LLM framework
+- **llamaindex.ai** - LlamaIndex RAG framework
+- **riverml.xyz** - River online ML library
+- **ansible.com** - AWX automation platform
+- **openpolicyagent.org** - Open Policy Agent
+
+#### Deployment & Security
+- **charts.helm.sh** - Helm chart repository (CRITICAL for k8s deployments)
+- **argo-cd.readthedocs.io** - Argo CD GitOps documentation
+- **goharbor.io** - Harbor container registry
+- **keycloak.org** - Keycloak identity management
+
+### Firewall Configuration Instructions
+
+**For Repository Administrators**: Add the blocked domains above to the custom allowlist in:
+1. Go to [Repository Settings > Copilot > Coding Agent](https://github.com/iLodeStar/AIOps-NAAS/settings/copilot/coding_agent)
+2. Add each blocked domain to the "Custom Allowlist"
+3. Alternatively, use [Actions setup steps](https://gh.io/copilot/actions-setup-steps) for pre-firewall environment setup
+
+### Network Access Validation
+
+**Test your access** to critical sites before starting development:
+```bash
+# Test key technology stack sites (should all return HTTP 200)
+curl -I --connect-timeout 10 https://clickhouse.com
+curl -I --connect-timeout 10 https://grafana.com
+curl -I --connect-timeout 10 https://prometheus.io
+curl -I --connect-timeout 10 https://ollama.ai
+curl -I --connect-timeout 10 https://charts.helm.sh
+
+# Quick test function
+test_site() { 
+    if timeout 10 curl -s -I "$1" > /dev/null 2>&1; then 
+        echo "$1 ✓"; 
+    else 
+        echo "$1 ✗ BLOCKED"; 
+    fi; 
+}
+test_site "https://grafana.com"
+```
 
 ## Future Development Guidance
 
