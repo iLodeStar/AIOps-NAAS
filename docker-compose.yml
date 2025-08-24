@@ -376,6 +376,86 @@ services:
       retries: 3
       start_period: 10s
 
+  # v0.4 Services - Fleet Reporting, Capacity Forecasting, Cross-Ship Benchmarking
+
+  # Fleet Aggregation Service - Central fleet data collection and aggregation  
+  fleet-aggregation:
+    build:
+      context: ./services/fleet-aggregation
+      dockerfile: Dockerfile
+    container_name: aiops-fleet-aggregation
+    ports:
+      - "8084:8084"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Capacity Forecasting Service - Seasonal traffic and capacity prediction
+  capacity-forecasting:
+    build:
+      context: ./services/capacity-forecasting
+      dockerfile: Dockerfile
+    container_name: aiops-capacity-forecasting
+    ports:
+      - "8085:8085"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Cross-Ship Benchmarking Service - Performance comparison and correlation analysis
+  cross-ship-benchmarking:
+    build:
+      context: ./services/cross-ship-benchmarking
+      dockerfile: Dockerfile
+    container_name: aiops-cross-ship-benchmarking
+    ports:
+      - "8086:8086"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
 volumes:
   clickhouse_data:
   vm_data:
