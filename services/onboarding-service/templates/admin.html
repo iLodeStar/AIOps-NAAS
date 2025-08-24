@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - AIOps Onboarding{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1><i class="fas fa-cogs"></i> Administration Dashboard</h1>
+        <p class="lead">Administrative tools and analytics for the onboarding service.</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-primary">{{ total_requests or 0 }}</h3>
+                <p class="card-text">Total Requests</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-warning">{{ pending_requests or 0 }}</h3>
+                <p class="card-text">Pending Approvals</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-success">{{ executed_requests or 0 }}</h3>
+                <p class="card-text">Executed</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-danger">{{ failed_requests or 0 }}</h3>
+                <p class="card-text">Failed/Rejected</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-line"></i> Recent Activity</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    <i class="fas fa-info-circle"></i>
+                    Recent system activity and request trends would be displayed here.
+                </p>
+                <div class="d-flex justify-content-between">
+                    <a href="/requests" class="btn btn-primary">
+                        <i class="fas fa-list"></i> View All Requests
+                    </a>
+                    <a href="/api/docs" class="btn btn-outline-secondary" target="_blank">
+                        <i class="fas fa-book"></i> API Documentation
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-tools"></i> Admin Tools</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary" onclick="refreshStats()">
+                        <i class="fas fa-sync"></i> Refresh Statistics
+                    </button>
+                    <button class="btn btn-outline-info" onclick="exportAllAudit()">
+                        <i class="fas fa-download"></i> Export All Audit Logs
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="viewSystemHealth()">
+                        <i class="fas fa-heartbeat"></i> System Health
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-shield-alt"></i> Security & Compliance</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Authentication Status</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-check text-success"></i> OIDC Integration Active</li>
+                            <li><i class="fas fa-check text-success"></i> Session Security Enabled</li>
+                            <li><i class="fas fa-check text-success"></i> Role-Based Access Control</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Policy Enforcement</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-check text-success"></i> OPA Policies Active</li>
+                            <li><i class="fas fa-check text-success"></i> Two-Level Approval Required</li>
+                            <li><i class="fas fa-check text-success"></i> Audit Trail Complete</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-cog"></i> System Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Environment</h6>
+                        <p><span class="badge bg-info">{{ 'Production' if not debug else 'Development' }}</span></p>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Policy Mode</h6>
+                        <p><span class="badge bg-success">{{ policy_mode or 'enforcing' }}</span></p>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Default Mode</h6>
+                        <p><span class="badge bg-warning">{{ 'Dry Run' if deploy_dry_run else 'Live' }}</span></p>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <small class="text-muted">
+                            <strong>Database:</strong> {{ database_type or 'SQLite' }} |
+                            <strong>OPA:</strong> {{ opa_url or 'http://opa:8181' }} |
+                            <strong>GitHub Integration:</strong> {{ 'Mock' if use_mock_actions else 'Live' }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function refreshStats() {
+    showNotification('Refreshing statistics...', 'info');
+    // In production, this would make an API call to refresh stats
+    setTimeout(() => {
+        showNotification('Statistics refreshed', 'success');
+    }, 1000);
+}
+
+function exportAllAudit() {
+    showNotification('Preparing audit export...', 'info');
+    // In production, this would trigger a comprehensive audit export
+    setTimeout(() => {
+        showNotification('Audit export would be available for download', 'success');
+    }, 1000);
+}
+
+function viewSystemHealth() {
+    showNotification('Checking system health...', 'info');
+    fetch('/health')
+        .then(response => response.json())
+        .then(data => {
+            showNotification(`System healthy - Version: ${data.version}`, 'success');
+        })
+        .catch(error => {
+            showNotification('Health check failed', 'danger');
+        });
+}
+</script>
+{% endblock %}

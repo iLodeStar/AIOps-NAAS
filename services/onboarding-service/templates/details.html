@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+
+{% block title %}{{ onboarding_request.title }} - AIOps Onboarding{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h1><i class="fas fa-file-alt"></i> {{ onboarding_request.title }}</h1>
+        <p class="text-muted">Request ID: {{ onboarding_request.request_id }}</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="/requests" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back to List
+        </a>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <!-- Request Details -->
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Request Details</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Title:</strong> {{ onboarding_request.title }}</p>
+                        {% if onboarding_request.description %}
+                            <p><strong>Description:</strong><br>{{ onboarding_request.description }}</p>
+                        {% endif %}
+                        {% if onboarding_request.ship_id %}
+                            <p><strong>Ship ID:</strong> <i class="fas fa-ship"></i> {{ onboarding_request.ship_id }}</p>
+                        {% endif %}
+                        {% if onboarding_request.project_name %}
+                            <p><strong>Project:</strong> {{ onboarding_request.project_name }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Environment:</strong> 
+                            <span class="badge {% if onboarding_request.environment == 'prod' %}bg-danger{% else %}bg-warning{% endif %}">
+                                {{ onboarding_request.environment.upper() }}
+                            </span>
+                        </p>
+                        {% if onboarding_request.application %}
+                            <p><strong>Application:</strong> {{ onboarding_request.application }}</p>
+                        {% endif %}
+                        {% if onboarding_request.overlay %}
+                            <p><strong>Overlay:</strong> {{ onboarding_request.overlay }}</p>
+                        {% endif %}
+                        <p><strong>Dry Run:</strong> 
+                            <span class="badge {% if onboarding_request.dry_run %}bg-success{% else %}bg-warning{% endif %}">
+                                {{ 'Yes' if onboarding_request.dry_run else 'No' }}
+                            </span>
+                        </p>
+                        <p><strong>Canary %:</strong> {{ onboarding_request.canary_percent }}%</p>
+                    </div>
+                </div>
+                
+                {% if onboarding_request.deployment_params %}
+                    <hr>
+                    <h6>Deployment Parameters:</h6>
+                    <pre class="bg-light p-2 rounded"><code>{{ onboarding_request.deployment_params | tojson(2) }}</code></pre>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Approval Actions -->
+        {% if can_approve_deployer or can_approve_authoriser %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5><i class="fas fa-check-circle"></i> Provide Approval</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="/requests/{{ onboarding_request.request_id }}/approve">
+                        {% if can_approve_deployer %}
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-success me-2" onclick="setApproval('deployer', 'approved')">
+                                    <i class="fas fa-thumbs-up"></i> Approve as Deployer
+                                </button>
+                                <button type="button" class="btn btn-danger" onclick="setApproval('deployer', 'rejected')">
+                                    <i class="fas fa-thumbs-down"></i> Reject as Deployer
+                                </button>
+                            </div>
+                        {% endif %}
+                        
+                        {% if can_approve_authoriser %}
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-success me-2" onclick="setApproval('authoriser', 'approved')">
+                                    <i class="fas fa-thumbs-up"></i> Approve as Authoriser
+                                </button>
+                                <button type="button" class="btn btn-danger" onclick="setApproval('authoriser', 'rejected')">
+                                    <i class="fas fa-thumbs-down"></i> Reject as Authoriser
+                                </button>
+                            </div>
+                        {% endif %}
+                        
+                        <div class="mb-3">
+                            <label for="comments" class="form-label">Comments</label>
+                            <textarea class="form-control" id="comments" name="comments" rows="3"
+                                      placeholder="Optional comments for your approval decision..."></textarea>
+                        </div>
+                        
+                        <input type="hidden" id="role" name="role" value="">
+                        <input type="hidden" id="decision" name="decision" value="">
+                        
+                        <button type="submit" id="submitApproval" class="btn btn-primary" style="display: none;">
+                            Submit Approval
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- Execute Action -->
+        {% if can_execute %}
+            <div class="card mt-3">
+                <div class="card-header bg-success text-white">
+                    <h5><i class="fas fa-play-circle"></i> Ready for Execution</h5>
+                </div>
+                <div class="card-body">
+                    <p>This request has received both required approvals and is ready for execution.</p>
+                    
+                    <form method="post" action="/api/requests/{{ onboarding_request.request_id }}/execute" 
+                          onsubmit="return confirm('Execute this deployment? This action will trigger the GitHub Actions workflow.')">
+                        <button type="submit" class="btn btn-success btn-lg">
+                            <i class="fas fa-rocket"></i> Execute Deployment
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- Approvals -->
+        {% if approvals %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5><i class="fas fa-users-check"></i> Approvals</h5>
+                </div>
+                <div class="card-body">
+                    {% for approval in approvals %}
+                        <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                            <div>
+                                <strong>{{ approval.role.title() }}:</strong>
+                                <span class="badge {% if approval.decision == 'approved' %}bg-success{% else %}bg-danger{% endif %}">
+                                    {{ approval.decision.title() }}
+                                </span>
+                                <br>
+                                <small class="text-muted">
+                                    {{ approval.approver_id }} ({{ approval.approver_email }})
+                                </small>
+                                {% if approval.comments %}
+                                    <br><small class="text-muted">{{ approval.comments }}</small>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <small class="text-muted">{{ approval.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- Audit Trail -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="fas fa-history"></i> Audit Trail</h5>
+            </div>
+            <div class="card-body">
+                {% if audit_logs %}
+                    <div class="timeline">
+                        {% for log in audit_logs %}
+                            <div class="timeline-item">
+                                <div class="timeline-marker bg-primary"></div>
+                                <div class="timeline-content">
+                                    <h6 class="mb-1">{{ log.action.replace('_', ' ').title() }}</h6>
+                                    <p class="mb-1">
+                                        <small>
+                                            <strong>{{ log.user_id }}</strong> ({{ log.user_email }})
+                                            {% if log.old_status and log.new_status %}
+                                                changed status from <span class="badge bg-secondary">{{ log.old_status }}</span>
+                                                to <span class="badge bg-primary">{{ log.new_status }}</span>
+                                            {% endif %}
+                                        </small>
+                                    </p>
+                                    <small class="text-muted">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                                    {% if log.details %}
+                                        <details class="mt-1">
+                                            <summary class="text-muted small">View details</summary>
+                                            <pre class="small mt-1"><code>{{ log.details | tojson(2) }}</code></pre>
+                                        </details>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No audit trail available.</p>
+                {% endif %}
+                
+                {% if user.has_role('admin') or user.has_role('viewer') %}
+                    <div class="mt-3">
+                        <a href="/api/audit/{{ onboarding_request.request_id }}?format=json" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-download"></i> Export JSON
+                        </a>
+                        <a href="/api/audit/{{ onboarding_request.request_id }}?format=csv" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-file-csv"></i> Export CSV
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <!-- Status Card -->
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-info-circle"></i> Request Status</h6>
+            </div>
+            <div class="card-body">
+                <div class="text-center">
+                    {% if onboarding_request.status == 'draft' %}
+                        <i class="fas fa-edit fa-3x text-secondary mb-3"></i>
+                        <h5>Draft</h5>
+                        <p class="text-muted">Request is being prepared</p>
+                    {% elif onboarding_request.status == 'submitted' %}
+                        <i class="fas fa-paper-plane fa-3x text-primary mb-3"></i>
+                        <h5>Submitted</h5>
+                        <p class="text-muted">Waiting for approvals</p>
+                    {% elif onboarding_request.status == 'deployer_approved' %}
+                        <i class="fas fa-check-circle fa-3x text-info mb-3"></i>
+                        <h5>Deployer Approved</h5>
+                        <p class="text-muted">Needs authoriser approval</p>
+                    {% elif onboarding_request.status == 'authoriser_approved' %}
+                        <i class="fas fa-check-circle fa-3x text-info mb-3"></i>
+                        <h5>Authoriser Approved</h5>
+                        <p class="text-muted">Needs deployer approval</p>
+                    {% elif onboarding_request.status == 'approved' %}
+                        <i class="fas fa-check-double fa-3x text-success mb-3"></i>
+                        <h5>Fully Approved</h5>
+                        <p class="text-muted">Ready for execution</p>
+                    {% elif onboarding_request.status == 'executed' %}
+                        <i class="fas fa-rocket fa-3x text-dark mb-3"></i>
+                        <h5>Executed</h5>
+                        <p class="text-muted">Deployment completed</p>
+                    {% elif onboarding_request.status == 'rejected' %}
+                        <i class="fas fa-times-circle fa-3x text-danger mb-3"></i>
+                        <h5>Rejected</h5>
+                        <p class="text-muted">Request was rejected</p>
+                    {% elif onboarding_request.status == 'failed' %}
+                        <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
+                        <h5>Failed</h5>
+                        <p class="text-muted">Execution failed</p>
+                    {% endif %}
+                </div>
+                
+                <hr>
+                
+                <div class="row text-center">
+                    <div class="col-6">
+                        <small class="text-muted">Created</small><br>
+                        <strong>{{ onboarding_request.created_at.strftime('%m/%d %H:%M') }}</strong>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Updated</small><br>
+                        <strong>
+                            {% if onboarding_request.updated_at %}
+                                {{ onboarding_request.updated_at.strftime('%m/%d %H:%M') }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Approval Progress -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-tasks"></i> Approval Progress</h6>
+            </div>
+            <div class="card-body">
+                {% set deployer_approved = approvals | selectattr('role', 'equalto', 'deployer') | selectattr('decision', 'equalto', 'approved') | list | length > 0 %}
+                {% set authoriser_approved = approvals | selectattr('role', 'equalto', 'authoriser') | selectattr('decision', 'equalto', 'approved') | list | length > 0 %}
+                {% set deployer_rejected = approvals | selectattr('role', 'equalto', 'deployer') | selectattr('decision', 'equalto', 'rejected') | list | length > 0 %}
+                {% set authoriser_rejected = approvals | selectattr('role', 'equalto', 'authoriser') | selectattr('decision', 'equalto', 'rejected') | list | length > 0 %}
+                
+                <div class="progress-step">
+                    <div class="d-flex align-items-center mb-2">
+                        {% if deployer_approved %}
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                        {% elif deployer_rejected %}
+                            <i class="fas fa-times-circle text-danger me-2"></i>
+                        {% else %}
+                            <i class="fas fa-circle text-muted me-2"></i>
+                        {% endif %}
+                        <strong>Deployer Approval</strong>
+                        {% if deployer_approved %}
+                            <span class="badge bg-success ms-2">Approved</span>
+                        {% elif deployer_rejected %}
+                            <span class="badge bg-danger ms-2">Rejected</span>
+                        {% else %}
+                            <span class="badge bg-secondary ms-2">Pending</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="progress-step">
+                    <div class="d-flex align-items-center mb-2">
+                        {% if authoriser_approved %}
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                        {% elif authoriser_rejected %}
+                            <i class="fas fa-times-circle text-danger me-2"></i>
+                        {% else %}
+                            <i class="fas fa-circle text-muted me-2"></i>
+                        {% endif %}
+                        <strong>Authoriser Approval</strong>
+                        {% if authoriser_approved %}
+                            <span class="badge bg-success ms-2">Approved</span>
+                        {% elif authoriser_rejected %}
+                            <span class="badge bg-danger ms-2">Rejected</span>
+                        {% else %}
+                            <span class="badge bg-secondary ms-2">Pending</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="progress-step">
+                    <div class="d-flex align-items-center">
+                        {% if onboarding_request.status == 'executed' %}
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                        {% elif onboarding_request.status == 'failed' %}
+                            <i class="fas fa-times-circle text-danger me-2"></i>
+                        {% elif deployer_approved and authoriser_approved %}
+                            <i class="fas fa-play-circle text-warning me-2"></i>
+                        {% else %}
+                            <i class="fas fa-circle text-muted me-2"></i>
+                        {% endif %}
+                        <strong>Execution</strong>
+                        {% if onboarding_request.status == 'executed' %}
+                            <span class="badge bg-success ms-2">Completed</span>
+                        {% elif onboarding_request.status == 'failed' %}
+                            <span class="badge bg-danger ms-2">Failed</span>
+                        {% elif deployer_approved and authoriser_approved %}
+                            <span class="badge bg-warning ms-2">Ready</span>
+                        {% else %}
+                            <span class="badge bg-secondary ms-2">Waiting</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Requester Info -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-user"></i> Requester Information</h6>
+            </div>
+            <div class="card-body">
+                <p><strong>User ID:</strong> {{ onboarding_request.requester_id }}</p>
+                {% if onboarding_request.requester_email %}
+                    <p><strong>Email:</strong> {{ onboarding_request.requester_email }}</p>
+                {% endif %}
+                <p><strong>Submitted:</strong> 
+                    {% if onboarding_request.submitted_at %}
+                        {{ onboarding_request.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                    {% else %}
+                        Not yet submitted
+                    {% endif %}
+                </p>
+                {% if onboarding_request.executed_at %}
+                    <p><strong>Executed:</strong> {{ onboarding_request.executed_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function setApproval(role, decision) {
+    document.getElementById('role').value = role;
+    document.getElementById('decision').value = decision;
+    document.getElementById('submitApproval').style.display = 'block';
+    
+    // Update submit button text and style
+    const submitBtn = document.getElementById('submitApproval');
+    if (decision === 'approved') {
+        submitBtn.textContent = `Submit ${role.charAt(0).toUpperCase() + role.slice(1)} Approval`;
+        submitBtn.className = 'btn btn-success';
+    } else {
+        submitBtn.textContent = `Submit ${role.charAt(0).toUpperCase() + role.slice(1)} Rejection`;
+        submitBtn.className = 'btn btn-danger';
+    }
+    
+    // Scroll to submit button
+    submitBtn.scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+
+<style>
+.timeline-item {
+    position: relative;
+    padding-left: 2rem;
+    margin-bottom: 1rem;
+}
+
+.timeline-marker {
+    position: absolute;
+    left: 0;
+    top: 0.25rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+}
+
+.timeline-content {
+    padding-left: 0.5rem;
+}
+
+.progress-step {
+    margin-bottom: 1rem;
+}
+</style>
+{% endblock %}

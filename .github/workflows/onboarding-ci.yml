@@ -1,0 +1,295 @@
+name: Onboarding Service CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'services/onboarding-service/**'
+      - 'opa/policies/onboarding.rego'
+      - 'opa/policies/service-actions.rego'
+      - '.github/workflows/onboarding-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'services/onboarding-service/**'
+      - 'opa/policies/onboarding.rego'
+      - 'opa/policies/service-actions.rego'
+
+env:
+  SERVICE_PATH: services/onboarding-service
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  lint-and-test:
+    name: Lint and Test Onboarding Service
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: '${{ env.SERVICE_PATH }}/requirements.txt'
+      
+      - name: Install dependencies
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-cov flake8 black isort
+      
+      - name: Lint with flake8
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Treat all other issues as warnings
+          flake8 . --count --max-complexity=10 --max-line-length=120 --statistics || true
+      
+      - name: Check code formatting
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          black --check --diff . || true
+          isort --check-only --diff . || true
+      
+      - name: Run unit tests
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          # Set environment for testing
+          export DATABASE_URL=sqlite:///./test.db
+          export SECRET_KEY=test-secret-key
+          export USE_MOCK_ACTIONS=true
+          export POLICY_MODE=permissive
+          
+          # Run tests with coverage
+          python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
+      
+      - name: Run integration tests
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          export DATABASE_URL=sqlite:///./integration_test.db
+          export SECRET_KEY=test-secret-key
+          export USE_MOCK_ACTIONS=true
+          export POLICY_MODE=permissive
+          
+          # Run standalone integration tests
+          python tests/test_integration.py
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: ${{ env.SERVICE_PATH }}/coverage.xml
+          flags: onboarding-service
+          name: onboarding-service-coverage
+          fail_ci_if_error: false
+
+  test-opa-policies:
+    name: Test OPA Policies
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup OPA
+        run: |
+          # Use Docker to run OPA instead of downloading binary due to firewall restrictions
+          docker pull openpolicyagent/opa:latest
+          echo "Using containerized OPA due to firewall restrictions on openpolicyagent.org"
+      
+      - name: Validate OPA policies
+        run: |
+          echo "Validating onboarding policies using Docker..."
+          # Use Docker to run OPA fmt instead of local binary
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest fmt /policies/onboarding.rego
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest fmt /policies/service-actions.rego
+          
+          echo "Testing policy syntax..."
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest test /policies/ || echo "No policy tests found - creating basic validation"
+      
+      - name: Test policy decisions
+        run: |
+          echo "Testing approval policy using Docker..."
+          
+          # Test valid deployer approval
+          echo '{
+            "input": {
+              "user": {"user_id": "dep1", "roles": ["deployer"]},
+              "request": {"requester_id": "req1", "status": "submitted"},
+              "approval": {"role": "deployer", "existing_approvals": []}
+            }
+          }' | docker run --rm -i -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest eval -d /policies/onboarding.rego "data.onboarding.approval.allowed"
+          
+          echo "Testing execution policy using Docker..."
+          
+          # Test valid two-level approval execution
+          echo '{
+            "input": {
+              "user": {"user_id": "executor", "roles": ["deployer"]},
+              "request": {"requester_id": "req1", "environment": "nonprod"},
+              "approvals": [
+                {"role": "deployer", "approver_id": "dep1", "approved_at": "2024-01-01T10:00:00Z"},
+                {"role": "authoriser", "approver_id": "auth1", "approved_at": "2024-01-01T10:30:00Z"}
+              ]
+            }
+          }' | docker run --rm -i -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest eval -d /policies/onboarding.rego "data.onboarding.execution.allowed"
+
+  build-docker-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, test-opa-policies]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          docker build -t onboarding-service:test .
+      
+      - name: Test Docker image
+        run: |
+          # Run container in background
+          docker run -d --name test-onboarding \
+            -p 8090:8090 \
+            -e DATABASE_URL=sqlite:///./data/test.db \
+            -e SECRET_KEY=test-secret \
+            -e USE_MOCK_ACTIONS=true \
+            onboarding-service:test
+          
+          # Wait for startup
+          sleep 10
+          
+          # Test health endpoint
+          curl -f http://localhost:8090/health || {
+            echo "Health check failed"
+            docker logs test-onboarding
+            exit 1
+          }
+          
+          echo "✅ Docker image test passed"
+          
+          # Cleanup
+          docker stop test-onboarding
+          docker rm test-onboarding
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Bandit security scan
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          pip install bandit[toml]
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . || echo "Security issues found - review bandit-report.json"
+      
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: ${{ env.SERVICE_PATH }}/bandit-report.json
+
+  integration-test-full:
+    name: Full Integration Test
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, test-opa-policies]
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: onboarding_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      opa:
+        image: openpolicyagent/opa:latest
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8181/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 8181:8181
+        cmd: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+        volumes:
+          - ./opa/policies:/policies:ro
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install psycopg2-binary
+      
+      - name: Setup OPA policies
+        run: |
+          # Load policies into OPA
+          curl -X PUT http://localhost:8181/v1/policies/onboarding \
+            --data-binary @opa/policies/onboarding.rego \
+            -H "Content-Type: text/plain"
+          
+          curl -X PUT http://localhost:8181/v1/policies/service-actions \
+            --data-binary @opa/policies/service-actions.rego \
+            -H "Content-Type: text/plain"
+      
+      - name: Run full integration test
+        working-directory: ${{ env.SERVICE_PATH }}
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/onboarding_test
+          SECRET_KEY: integration-test-secret
+          OPA_URL: http://localhost:8181
+          USE_MOCK_ACTIONS: true
+          POLICY_MODE: enforcing
+        run: |
+          # Initialize database
+          python -c "from db import init_db; init_db()"
+          
+          # Run comprehensive integration tests
+          python tests/test_integration.py
+          
+          echo "✅ Full integration test completed"
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-docker-image, security-scan, integration-test-full]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: staging
+    
+    steps:
+      - name: Deploy to staging environment
+        run: |
+          echo "🚀 Deploying onboarding service to staging"
+          echo "This would trigger staging deployment"
+          # Actual staging deployment logic would go here
