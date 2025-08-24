@@ -1,5 +1,8 @@
 name: aiops-naas
 
+# For environment configuration, copy .env.example to .env and customize
+# See configs/vendor-integrations.example.yaml for vendor-specific settings
+
 services:
   # ClickHouse - Log storage with MergeTree engine
   clickhouse:

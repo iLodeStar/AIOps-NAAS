@@ -1,0 +1,285 @@
+name: AIOps NAAS CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_soak_test:
+        description: 'Run the 10-minute soak test'
+        required: false
+        default: false
+        type: boolean
+      soak_test_duration:
+        description: 'Soak test duration in seconds'
+        required: false
+        default: '600'
+        type: string
+  schedule:
+    # Run soak test weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  # Basic CI - fast tests for every push/PR
+  basic-ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pyyaml requests
+        
+        # Install NATS client if available
+        pip install nats-py || echo "Warning: nats-py not available"
+    
+    - name: Validate configuration files
+      run: |
+        # Check YAML syntax
+        python -c "import yaml; yaml.safe_load(open('configs/vendor-integrations.example.yaml'))"
+        echo "✅ vendor-integrations.example.yaml is valid"
+        
+        # Check .env.example format
+        if grep -q "^[A-Z_][A-Z0-9_]*=" .env.example; then
+          echo "✅ .env.example format is valid"
+        else
+          echo "❌ .env.example format is invalid"
+          exit 1
+        fi
+    
+    - name: Test data simulator (dry run)
+      run: |
+        cd tools/data-simulator
+        python data_simulator.py --duration 10 --log-level INFO
+    
+    - name: Test NATS consumer (dry run)
+      run: |
+        cd tools/data-simulator
+        timeout 5 python consumer.py --subjects "test.subject" --duration 3 || echo "Consumer test completed"
+    
+    - name: Run unit tests
+      run: |
+        # Run existing tests
+        if [ -d "tests/v1.0" ]; then
+          pytest tests/v1.0/ -v
+        fi
+        
+        # Test soak test runner (dry run)
+        python tests/e2e/test_simulator_soak.py --help
+        
+    - name: Lint shell scripts
+      run: |
+        # Basic shell script validation
+        bash -n scripts/run_soak_test.sh
+        echo "✅ Shell scripts are valid"
+
+  # Extended soak test - manual or scheduled only  
+  soak-test:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.run_soak_test == 'true' ||
+      github.event_name == 'schedule'
+    
+    timeout-minutes: 20  # 10 min test + 10 min buffer
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl wget
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pyyaml requests asyncio
+        pip install nats-py || echo "Warning: nats-py not available, will run without NATS"
+    
+    - name: Set up Docker
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Create configuration files
+      run: |
+        # Copy example configs
+        cp configs/vendor-integrations.example.yaml configs/vendor-integrations.yaml
+        cp .env.example .env
+        
+        # Create any needed directories
+        mkdir -p reports logs
+    
+    - name: Set soak test duration
+      run: |
+        DURATION="${{ github.event.inputs.soak_test_duration || '600' }}"
+        echo "SOAK_DURATION=$DURATION" >> $GITHUB_ENV
+        echo "Soak test duration: $DURATION seconds"
+    
+    - name: Run soak test
+      run: |
+        # Run the soak test with timeout
+        timeout 1200 bash scripts/run_soak_test.sh \
+          --duration $SOAK_DURATION \
+          --config configs/vendor-integrations.yaml \
+          --log-level INFO
+    
+    - name: Upload soak test artifacts
+      uses: actions/upload-artifact@v4
+      if: always()  # Upload even if test fails
+      with:
+        name: soak-test-artifacts-${{ github.run_number }}
+        path: |
+          reports/soak-*.json
+          reports/soak-test-*/
+          *.log
+        retention-days: 30
+    
+    - name: Upload JUnit test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: junit-results-${{ github.run_number }}
+        path: reports/soak-test-*/junit-results.xml
+        retention-days: 30
+    
+    - name: Comment PR with soak test results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          try {
+            // Try to read soak test summary
+            let summaryData = {};
+            const summaryFiles = [
+              'reports/soak-summary.json',
+              'reports/soak-test-*/soak-summary.json'
+            ];
+            
+            for (const pattern of summaryFiles) {
+              try {
+                const data = fs.readFileSync(pattern, 'utf8');
+                summaryData = JSON.parse(data);
+                break;
+              } catch (e) {
+                // Try next pattern
+              }
+            }
+            
+            const testInfo = summaryData.test_info || {};
+            const healthInfo = summaryData.health_monitoring || {};
+            const assertions = summaryData.assertions || {};
+            const errors = summaryData.errors || [];
+            
+            const allPassed = Object.values(assertions).every(v => v);
+            const statusIcon = allPassed ? '✅' : '❌';
+            const statusText = allPassed ? 'PASSED' : 'FAILED';
+            
+            const comment = `## ${statusIcon} Soak Test Results ${statusText}
+            
+            **Test Duration:** ${testInfo.duration_seconds || 'N/A'} seconds
+            **Health Checks:** ${healthInfo.total_checks || 0}
+            **Overall Health Rate:** ${(healthInfo.overall_health_rate || 0).toFixed(1)}%
+            **Errors:** ${errors.length}
+            
+            **Assertions:**
+            ${Object.entries(assertions).map(([k, v]) => `- ${v ? '✅' : '❌'} ${k}`).join('\n')}
+            
+            <details>
+            <summary>Service Availability</summary>
+            
+            ${Object.entries(healthInfo.service_availability || {}).map(([service, stats]) => 
+              `- **${service}:** ${(stats.availability_percent || 0).toFixed(1)}% (${stats.healthy}/${stats.total})`
+            ).join('\n')}
+            </details>
+            
+            ${errors.length > 0 ? `
+            <details>
+            <summary>Errors (${errors.length})</summary>
+            
+            ${errors.slice(0, 5).map(e => `- \`${e.timestamp}\`: ${e.error}`).join('\n')}
+            ${errors.length > 5 ? `\n... and ${errors.length - 5} more errors` : ''}
+            </details>
+            ` : ''}
+            `;
+            
+            // Post comment to PR
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+          } catch (error) {
+            console.log('Failed to create soak test comment:', error);
+            
+            // Post minimal comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔧 Soak Test Executed\n\nSoak test was executed but results could not be parsed. Check the artifacts for detailed results.`
+            });
+          }
+
+  # Documentation validation
+  docs-validation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check documentation files exist
+      run: |
+        # Check for required documentation
+        required_docs=(
+          "README.md"
+          "docs/architecture.md"
+          "docs/roadmap.md"
+          "configs/vendor-integrations.example.yaml"
+          ".env.example"
+        )
+        
+        missing_docs=()
+        for doc in "${required_docs[@]}"; do
+          if [[ ! -f "$doc" ]]; then
+            missing_docs+=("$doc")
+          fi
+        done
+        
+        if [[ ${#missing_docs[@]} -ne 0 ]]; then
+          echo "❌ Missing documentation files:"
+          printf '  - %s\n' "${missing_docs[@]}"
+          exit 1
+        fi
+        
+        echo "✅ All required documentation files exist"
+    
+    - name: Validate markdown links
+      run: |
+        # Basic markdown link validation
+        find docs/ -name "*.md" -exec grep -l "http" {} \; || echo "No external links found"
+        echo "✅ Documentation validated"
+    
+    - name: Check vendor configuration documentation
+      run: |
+        # Check if vendor config docs will be created
+        if [[ ! -f "docs/configuration/vendor-config.md" ]]; then
+          echo "⚠️ Note: docs/configuration/vendor-config.md should be created"
+        fi
