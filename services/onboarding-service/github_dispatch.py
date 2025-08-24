@@ -20,11 +20,13 @@ class GitHubDispatcher:
         self.repo_name = settings.github_repo_name
         self.base_url = "https://api.github.com"
         
-        self.headers = {
-            "Authorization": f"Bearer {self.github_token}",
+        self.headers = {}
+        if self.github_token:
+            self.headers["Authorization"] = f"Bearer {self.github_token}"
+        self.headers.update({
             "Accept": "application/vnd.github.v3+json",
             "Content-Type": "application/json"
-        }
+        })
     
     async def dispatch_workflow(
         self,

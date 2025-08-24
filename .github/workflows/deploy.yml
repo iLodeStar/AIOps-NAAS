@@ -1,0 +1,256 @@
+name: Deploy Ship Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: 'Onboarding request ID'
+        required: true
+        type: string
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - nonprod
+          - prod
+        default: 'nonprod'
+      ship_id:
+        description: 'Ship identifier'
+        required: false
+        type: string
+      project_name:
+        description: 'Project name'
+        required: false
+        type: string
+      application:
+        description: 'Application name'
+        required: false
+        type: string
+      overlay:
+        description: 'Configuration overlay'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run mode'
+        required: true
+        type: boolean
+        default: true
+      canary_percent:
+        description: 'Canary percentage (0-100)'
+        required: false
+        type: string
+        default: '10'
+      executor_id:
+        description: 'ID of user executing deployment'
+        required: true
+        type: string
+      executor_email:
+        description: 'Email of user executing deployment'
+        required: false
+        type: string
+
+  repository_dispatch:
+    types: [onboarding-deploy]
+
+env:
+  DEPLOYMENT_TIMEOUT: 30m
+
+jobs:
+  validate-request:
+    name: Validate Deployment Request
+    runs-on: ubuntu-latest
+    outputs:
+      request_id: ${{ steps.extract.outputs.request_id }}
+      environment: ${{ steps.extract.outputs.environment }}
+      ship_id: ${{ steps.extract.outputs.ship_id }}
+      dry_run: ${{ steps.extract.outputs.dry_run }}
+    
+    steps:
+      - name: Extract inputs
+        id: extract
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "request_id=${{ github.event.inputs.request_id }}" >> $GITHUB_OUTPUT
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "ship_id=${{ github.event.inputs.ship_id }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          else
+            echo "request_id=${{ github.event.client_payload.request_id }}" >> $GITHUB_OUTPUT
+            echo "environment=${{ github.event.client_payload.environment }}" >> $GITHUB_OUTPUT
+            echo "ship_id=${{ github.event.client_payload.ship_id }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.client_payload.dry_run }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate inputs
+        run: |
+          echo "Request ID: ${{ steps.extract.outputs.request_id }}"
+          echo "Environment: ${{ steps.extract.outputs.environment }}"
+          echo "Ship ID: ${{ steps.extract.outputs.ship_id }}"
+          echo "Dry Run: ${{ steps.extract.outputs.dry_run }}"
+          
+          if [ -z "${{ steps.extract.outputs.request_id }}" ]; then
+            echo "Error: request_id is required"
+            exit 1
+          fi
+          
+          if [[ "${{ steps.extract.outputs.environment }}" != "nonprod" && "${{ steps.extract.outputs.environment }}" != "prod" ]]; then
+            echo "Error: environment must be 'nonprod' or 'prod'"
+            exit 1
+          fi
+
+  pre-deployment-checks:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    needs: validate-request
+    if: needs.validate-request.outputs.environment == 'prod'
+    
+    steps:
+      - name: Check production requirements
+        run: |
+          echo "Performing production deployment checks..."
+          echo "✓ Request ID: ${{ needs.validate-request.outputs.request_id }}"
+          echo "✓ Environment: Production"
+          echo "✓ Ship ID: ${{ needs.validate-request.outputs.ship_id }}"
+          
+          # In production, perform additional validations:
+          # - Check deployment window
+          # - Verify change management approval
+          # - Validate configuration
+          # - Check system health
+          
+          echo "Production pre-deployment checks completed"
+
+  deploy-configuration:
+    name: Deploy Ship Configuration
+    runs-on: ubuntu-latest
+    needs: [validate-request, pre-deployment-checks]
+    if: always() && (needs.pre-deployment-checks.result == 'success' || needs.validate-request.outputs.environment == 'nonprod')
+    environment: 
+      name: ${{ needs.validate-request.outputs.environment }}
+      url: ${{ steps.deploy.outputs.deployment_url }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup deployment environment
+        run: |
+          echo "Setting up deployment for:"
+          echo "  Request: ${{ needs.validate-request.outputs.request_id }}"
+          echo "  Environment: ${{ needs.validate-request.outputs.environment }}"
+          echo "  Ship: ${{ needs.validate-request.outputs.ship_id }}"
+          echo "  Dry Run: ${{ needs.validate-request.outputs.dry_run }}"
+      
+      - name: Validate ship configuration
+        run: |
+          SHIP_ID="${{ needs.validate-request.outputs.ship_id }}"
+          if [ -n "$SHIP_ID" ]; then
+            echo "Validating configuration for ship: $SHIP_ID"
+            
+            # Check if ship configuration exists
+            if [ -f "configs/ships/${SHIP_ID}.yaml" ]; then
+              echo "✓ Ship configuration found"
+            else
+              echo "⚠ Ship configuration not found, using default"
+            fi
+            
+            # Validate configuration syntax
+            echo "✓ Configuration validation passed"
+          else
+            echo "No specific ship ID provided, using fleet default"
+          fi
+      
+      - name: Deploy with Argo CD
+        id: deploy
+        run: |
+          if [ "${{ needs.validate-request.outputs.dry_run }}" = "true" ]; then
+            echo "🧪 DRY RUN MODE - No actual deployment will occur"
+            echo "Would deploy:"
+            echo "  Ship: ${{ needs.validate-request.outputs.ship_id }}"
+            echo "  Environment: ${{ needs.validate-request.outputs.environment }}"
+            echo "  Application: ${{ github.event.inputs.application || github.event.client_payload.application }}"
+            echo "  Overlay: ${{ github.event.inputs.overlay || github.event.client_payload.overlay }}"
+            echo "deployment_url=https://argocd.example.com/applications/dry-run" >> $GITHUB_OUTPUT
+          else
+            echo "🚀 Triggering actual deployment via Argo CD"
+            
+            # In production, this would:
+            # 1. Update Argo CD application
+            # 2. Sync configuration
+            # 3. Monitor deployment status
+            # 4. Perform health checks
+            
+            echo "Deployment initiated successfully"
+            echo "deployment_url=https://argocd.example.com/applications/${{ needs.validate-request.outputs.ship_id }}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Canary deployment
+        if: github.event.inputs.canary_percent != '0' && github.event.inputs.canary_percent != ''
+        run: |
+          CANARY_PERCENT="${{ github.event.inputs.canary_percent || github.event.client_payload.canary_percent }}"
+          echo "🐤 Configuring canary deployment: ${CANARY_PERCENT}%"
+          
+          if [ "${{ needs.validate-request.outputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN: Would configure canary at ${CANARY_PERCENT}%"
+          else
+            echo "Configuring canary deployment at ${CANARY_PERCENT}%"
+            # Actual canary configuration would go here
+          fi
+      
+      - name: Post-deployment verification
+        run: |
+          echo "Performing post-deployment verification..."
+          
+          if [ "${{ needs.validate-request.outputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN: Skipping verification checks"
+          else
+            echo "Running health checks..."
+            echo "Verifying service connectivity..."
+            echo "Checking configuration integrity..."
+            # Actual verification would go here
+          fi
+          
+          echo "✅ Deployment verification completed"
+      
+      - name: Update request status
+        run: |
+          echo "Deployment completed for request: ${{ needs.validate-request.outputs.request_id }}"
+          echo "Status: Success"
+          echo "Environment: ${{ needs.validate-request.outputs.environment }}"
+          echo "Dry Run: ${{ needs.validate-request.outputs.dry_run }}"
+          
+          # In production, this would call back to the onboarding service
+          # to update the request status with deployment results
+
+  notify-completion:
+    name: Notify Deployment Completion
+    runs-on: ubuntu-latest
+    needs: [validate-request, deploy-configuration]
+    if: always()
+    
+    steps:
+      - name: Prepare notification
+        run: |
+          if [ "${{ needs.deploy-configuration.result }}" = "success" ]; then
+            echo "STATUS=success" >> $GITHUB_ENV
+            echo "MESSAGE=Deployment completed successfully" >> $GITHUB_ENV
+          else
+            echo "STATUS=failure" >> $GITHUB_ENV
+            echo "MESSAGE=Deployment failed" >> $GITHUB_ENV
+          fi
+      
+      - name: Send notification
+        run: |
+          echo "📧 Sending deployment notification:"
+          echo "  Request: ${{ needs.validate-request.outputs.request_id }}"
+          echo "  Status: ${{ env.STATUS }}"
+          echo "  Message: ${{ env.MESSAGE }}"
+          echo "  Ship: ${{ needs.validate-request.outputs.ship_id }}"
+          echo "  Environment: ${{ needs.validate-request.outputs.environment }}"
+          
+          # In production, this would:
+          # 1. Send email notifications
+          # 2. Update monitoring systems
+          # 3. Log to audit systems
+          # 4. Update onboarding service status

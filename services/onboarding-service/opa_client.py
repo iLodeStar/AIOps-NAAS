@@ -270,7 +270,7 @@ class MockOPAClient(OPAClient):
         role_permissions = {
             "viewer": ["view", "list"],
             "requester": ["view", "list", "create", "submit"],
-            "deployer": ["view", "list", "approve_deployer"],
+            "deployer": ["view", "list", "approve_deployer", "execute"],
             "authoriser": ["view", "list", "approve_authoriser"],
         }
         

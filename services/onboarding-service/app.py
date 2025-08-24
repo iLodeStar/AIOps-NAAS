@@ -975,6 +975,47 @@ async def approve_request_form(
     )
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(
+    request: Request,
+    user: UserInfo = Depends(require_any_role([UserRole.ADMIN, UserRole.VIEWER])),
+    db: Session = Depends(get_db)
+):
+    """Admin dashboard."""
+    
+    # Get statistics
+    total_requests = db.query(OnboardingRequest).count()
+    pending_requests = db.query(OnboardingRequest)\
+                        .filter(OnboardingRequest.status.in_([
+                            RequestStatus.SUBMITTED.value,
+                            RequestStatus.DEPLOYER_APPROVED.value,
+                            RequestStatus.AUTHORISER_APPROVED.value
+                        ])).count()
+    executed_requests = db.query(OnboardingRequest)\
+                         .filter(OnboardingRequest.status == RequestStatus.EXECUTED.value)\
+                         .count()
+    failed_requests = db.query(OnboardingRequest)\
+                       .filter(OnboardingRequest.status.in_([
+                           RequestStatus.REJECTED.value,
+                           RequestStatus.FAILED.value
+                       ])).count()
+    
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "user": user,
+        "total_requests": total_requests,
+        "pending_requests": pending_requests,
+        "executed_requests": executed_requests,
+        "failed_requests": failed_requests,
+        "debug": settings.debug,
+        "policy_mode": settings.policy_mode,
+        "deploy_dry_run": settings.deploy_dry_run,
+        "use_mock_actions": settings.use_mock_actions,
+        "database_type": "SQLite" if "sqlite" in settings.database_url else "PostgreSQL",
+        "opa_url": settings.opa_url
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8090)
