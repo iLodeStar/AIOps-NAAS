@@ -1,0 +1,39 @@
+# Vector configuration for AIOps NAAS
+# Simplified config that tails logs and forwards them
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# Source: Tail log files from sample-logs directory
+[sources.sample_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+ignore_older_secs = 86400
+read_from = "beginning"
+
+# Transform: Simple passthrough with basic parsing
+[transforms.parse_logs]
+type = "remap"
+inputs = ["sample_logs"]
+source = '''
+  # Simply pass through the message and add basic metadata
+  .timestamp = now()
+  .level = "INFO"
+  .message = string!(.message)
+  .source = "vector"
+  .host = "ship-01"
+  .service = "unknown"
+  .raw_log = string!(.message)
+  
+  # Basic labels
+  .labels = {"environment": "local", "version": "1.0.0"}
+'''
+
+# Sink: Console output for debugging
+[sinks.console]
+type = "console"
+inputs = ["parse_logs"]
+
+[sinks.console.encoding]
+codec = "json"

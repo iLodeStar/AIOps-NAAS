@@ -1,0 +1,234 @@
+name: aiops-naas
+
+services:
+  # ClickHouse - Log storage with MergeTree engine
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: aiops-clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native interface
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse123}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # VictoriaMetrics - Metrics storage
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: aiops-victoria-metrics
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm_data:/victoria-metrics-data
+    command:
+      - --storageDataPath=/victoria-metrics-data
+      - --httpListenAddr=:8428
+      - --retentionPeriod=1y
+      - --maxConcurrentInserts=8
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # VictoriaMetrics Agent - Scrapes metrics and sends to VictoriaMetrics
+  vmagent:
+    image: victoriametrics/vmagent:latest
+    container_name: aiops-vmagent
+    volumes:
+      - ./vmagent/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - vmagent_data:/vmagentdata
+    command:
+      - --promscrape.config=/etc/prometheus/prometheus.yml
+      - --remoteWrite.url=http://victoria-metrics:8428/api/v1/write
+    depends_on:
+      - victoria-metrics
+      - node-exporter
+    restart: unless-stopped
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: aiops-node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - '/:/host:ro,rslave'
+    restart: unless-stopped
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: aiops-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_PLUGIN_BACKGROUNDINSTALLER_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - victoria-metrics
+      - clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Qdrant - Vector database for RAG
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aiops-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # Ollama - LLM inference engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aiops-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # NATS - Message bus with JetStream
+  nats:
+    image: nats:alpine
+    container_name: aiops-nats
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+    command: 
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--http_port=8222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # MailHog - Local SMTP testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: aiops-mailhog
+    ports:
+      - "8025:8025"  # Web UI
+      - "1025:1025"  # SMTP
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8025/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Vector - Log processing and routing
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: aiops-vector
+    volumes:
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+      - ./sample-logs:/var/log/sample:ro
+      - vector_data:/var/lib/vector
+    command: ["--config", "/etc/vector/vector.toml"]
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
+
+  # VMAlert - Alert manager for VictoriaMetrics
+  vmalert:
+    image: victoriametrics/vmalert:latest
+    container_name: aiops-vmalert
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./alerts/system-alerts.yml:/etc/alerts/alerts.yml:ro
+    command:
+      - --rule=/etc/alerts/alerts.yml
+      - --datasource.url=http://victoria-metrics:8428
+      - --notifier.url=http://alertmanager:9093
+      - --httpListenAddr=:8880
+      - --evaluationInterval=30s
+      - --external.url=http://localhost:8880
+    depends_on:
+      - victoria-metrics
+      - alertmanager
+    restart: unless-stopped
+
+  # Alertmanager - Handle alerts and route to MailHog
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: aiops-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alerts/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:9093
+      - --cluster.listen-address=
+    depends_on:
+      - mailhog
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+  vm_data:
+  vmagent_data:
+  grafana_data:
+  qdrant_data:
+  ollama_data:
+  nats_data:
+  vector_data:
+  alertmanager_data:

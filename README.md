@@ -38,7 +38,12 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 1. Clone the repo.
 2. Read docs/architecture.md to understand the edge+core design.
 3. Review docs/roadmap.md and open issues for the next milestone you want to tackle.
-4. Coming soon: docker-compose and Helm charts for v0.1 bootstrap on a test node.
+
+## Local Bootstrap
+Get started quickly with the complete local development environment:
+- **[Quickstart Guide](docs/quickstart.md)** - Docker Compose stack for v0.1 MVP testing
+- **Stack includes**: ClickHouse, VictoriaMetrics, Grafana, Ollama, Qdrant, NATS, MailHog, Vector, VMAlert, Alertmanager
+- **One command setup**: `docker compose up -d` brings up the full observability stack
 
 ## Contributing
 PRs welcome. Please discuss substantial changes via issues first. Follow conventional commits if possible.
