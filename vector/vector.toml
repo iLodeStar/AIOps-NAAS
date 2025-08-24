@@ -12,21 +12,18 @@ include = ["/var/log/sample/*.log"]
 ignore_older_secs = 86400
 read_from = "beginning"
 
-# Transform: Simple passthrough with basic parsing
+# Transform: Add basic metadata to logs
 [transforms.parse_logs]
 type = "remap"
 inputs = ["sample_logs"]
 source = '''
-  # Simply pass through the message and add basic metadata
   .timestamp = now()
   .level = "INFO"
-  .message = string!(.message)
+  .message = .message
   .source = "vector"
   .host = "ship-01"
   .service = "unknown"
-  .raw_log = string!(.message)
-  
-  # Basic labels
+  .raw_log = .message
   .labels = {"environment": "local", "version": "1.0.0"}
 '''
 
@@ -37,3 +34,17 @@ inputs = ["parse_logs"]
 
 [sinks.console.encoding]
 codec = "json"
+
+# Sink: Send logs to ClickHouse (temporarily disabled due to DNS issues)
+# [sinks.clickhouse]
+# type = "clickhouse"
+# inputs = ["parse_logs"]
+# endpoint = "http://clickhouse:8123"
+# table = "logs.raw"
+# database = "logs"
+# compression = "gzip"
+
+# [sinks.clickhouse.auth]
+# strategy = "basic"
+# user = "${CLICKHOUSE_USER:-default}"
+# password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"

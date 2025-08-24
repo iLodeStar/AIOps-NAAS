@@ -1,5 +1,5 @@
 global:
-  smtp_smarthost: 'localhost:1025'
+  smtp_smarthost: 'mailhog:1025'
   smtp_from: 'aiops@ship-01.cruise.local'
   smtp_auth_username: ''
   smtp_auth_password: ''
