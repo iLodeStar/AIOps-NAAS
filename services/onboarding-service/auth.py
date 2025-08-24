@@ -3,7 +3,7 @@
 import json
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import base64
 import hmac
 import hashlib
@@ -47,7 +47,7 @@ class SimpleSessionSerializer:
             
             # Check expiration
             created_at = datetime.fromisoformat(data.get('created_at', ''))
-            if (datetime.utcnow() - created_at).total_seconds() > max_age:
+            if (datetime.now(timezone.utc) - created_at).total_seconds() > max_age:
                 raise ValueError("Token expired")
             
             return data
@@ -129,7 +129,7 @@ def create_session_token(user_info: UserInfo) -> str:
         'email': user_info.email,
         'name': user_info.name,
         'roles': user_info.roles,
-        'created_at': datetime.utcnow().isoformat()
+        'created_at': datetime.now(timezone.utc).isoformat()
     }
     return serializer.dumps(data)
 
@@ -215,7 +215,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> U
     # Update user in database
     user = db.query(User).filter(User.user_id == user_info.user_id).first()
     if user:
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         user.roles = user_info.roles
         db.commit()
     else:
@@ -225,7 +225,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> U
             email=user_info.email,
             name=user_info.name,
             roles=user_info.roles,
-            last_login=datetime.utcnow()
+            last_login=datetime.now(timezone.utc)
         )
         db.add(user)
         db.commit()

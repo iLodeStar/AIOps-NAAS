@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 import json
 import csv
@@ -219,7 +219,7 @@ async def send_notification(
             "email": user.email,
             "roles": user.roles
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "additional_context": additional_context or {}
     }
     
@@ -466,7 +466,7 @@ async def health_check():
         "status": "healthy",
         "service": "onboarding-service",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -509,10 +509,10 @@ async def create_request(
         action="create",
         user=user,
         new_status=RequestStatus.DRAFT.value,
-        details=request_data.dict()
+        details=request_data.model_dump()
     )
     
-    return OnboardingRequestResponse.from_orm(onboarding_request)
+    return OnboardingRequestResponse.model_validate(onboarding_request)
 
 
 @app.post("/api/requests/{request_id}/submit")
@@ -541,7 +541,7 @@ async def submit_request(
     # Update status
     old_status = onboarding_request.status
     onboarding_request.status = RequestStatus.SUBMITTED.value
-    onboarding_request.submitted_at = datetime.utcnow()
+    onboarding_request.submitted_at = datetime.now(timezone.utc)
     
     db.commit()
     
@@ -715,7 +715,7 @@ async def execute_request(
     old_status = onboarding_request.status
     if dispatch_result.get("success"):
         new_status = RequestStatus.EXECUTED.value
-        onboarding_request.executed_at = datetime.utcnow()
+        onboarding_request.executed_at = datetime.now(timezone.utc)
     else:
         new_status = RequestStatus.FAILED.value
     
@@ -786,7 +786,7 @@ async def api_list_requests(
                    .limit(limit)\
                    .all()
     
-    return [OnboardingRequestResponse.from_orm(req) for req in requests]
+    return [OnboardingRequestResponse.model_validate(req) for req in requests]
 
 
 @app.get("/api/requests/{request_id}", response_model=OnboardingRequestResponse)
@@ -809,7 +809,7 @@ async def api_get_request(
         if onboarding_request.requester_id != user.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
     
-    return OnboardingRequestResponse.from_orm(onboarding_request)
+    return OnboardingRequestResponse.model_validate(onboarding_request)
 
 
 @app.get("/api/requests/{request_id}/approvals", response_model=List[ApprovalResponse])
@@ -837,7 +837,7 @@ async def api_get_approvals(
                   .order_by(Approval.created_at)\
                   .all()
     
-    return [ApprovalResponse.from_orm(approval) for approval in approvals]
+    return [ApprovalResponse.model_validate(approval) for approval in approvals]
 
 
 @app.get("/api/audit/{request_id}")

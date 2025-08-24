@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import tempfile
 import os
+from unittest.mock import patch
 
 # Add current directory to path
 import sys
@@ -94,8 +95,11 @@ def client(test_db):
     
     app.dependency_overrides[get_current_user] = mock_get_current_user
     
-    with TestClient(app) as test_client:
-        yield test_client
+    # Mock the OPA client at module level
+    mock_opa = MockOPAClient()
+    with patch('app.opa_client', mock_opa):
+        with TestClient(app) as test_client:
+            yield test_client
     
     app.dependency_overrides.clear()
 
@@ -189,62 +193,76 @@ class TestOnboardingService:
     
     def test_approval_workflow(self, client, test_db):
         """Test the two-level approval workflow."""
-        # Create and submit a request
-        request_data = {
-            "title": "Test Approval Workflow",
-            "environment": "nonprod"
-        }
+        # Mock the OPA client for this specific test
+        mock_opa = MockOPAClient()
         
-        create_response = client.post("/api/requests", json=request_data)
-        request_id = create_response.json()["request_id"]
-        
-        # Submit for approval
-        client.post(f"/api/requests/{request_id}/submit")
-        
-        # Mock different users for approvals
-        def mock_deployer_user():
-            return UserInfo(
-                user_id="deployer_user",
-                email="deployer@cruise.com", 
-                name="Deployer User",
-                roles=[UserRole.DEPLOYER.value]
-            )
-        
-        def mock_authoriser_user():
-            return UserInfo(
-                user_id="auth_user",
-                email="auth@cruise.com",
-                name="Authoriser User", 
-                roles=[UserRole.AUTHORISER.value]
-            )
-        
-        # First approval (deployer)
-        app.dependency_overrides[get_current_user] = mock_deployer_user
-        
-        approval_data = {
-            "role": "deployer",
-            "decision": "approved",
-            "comments": "Deployer approval"
-        }
-        
-        response = client.post(f"/api/requests/{request_id}/approve", json=approval_data)
-        assert response.status_code == 200
-        
-        # Second approval (authoriser)
-        app.dependency_overrides[get_current_user] = mock_authoriser_user
-        
-        approval_data = {
-            "role": "authoriser", 
-            "decision": "approved",
-            "comments": "Authoriser approval"
-        }
-        
-        response = client.post(f"/api/requests/{request_id}/approve", json=approval_data)
-        assert response.status_code == 200
-        
-        # Check final status
-        response = client.get(f"/api/requests/{request_id}")
-        assert response.json()["status"] == RequestStatus.APPROVED.value
+        with patch('app.opa_client', mock_opa):
+            # Create and submit a request
+            request_data = {
+                "title": "Test Approval Workflow",
+                "environment": "nonprod"
+            }
+            
+            create_response = client.post("/api/requests", json=request_data)
+            request_id = create_response.json()["request_id"]
+            
+            # Submit for approval
+            client.post(f"/api/requests/{request_id}/submit")
+            
+            # Mock different users for approvals
+            def mock_deployer_user():
+                return UserInfo(
+                    user_id="deployer_user",
+                    email="deployer@cruise.com", 
+                    name="Deployer User",
+                    roles=[UserRole.DEPLOYER.value]
+                )
+            
+            def mock_authoriser_user():
+                return UserInfo(
+                    user_id="auth_user",
+                    email="auth@cruise.com",
+                    name="Authoriser User", 
+                    roles=[UserRole.AUTHORISER.value]
+                )
+            
+            # First approval (deployer)
+            app.dependency_overrides[get_current_user] = mock_deployer_user
+            
+            approval_data = {
+                "role": "deployer",
+                "decision": "approved",
+                "comments": "Deployer approval"
+            }
+            
+            response = client.post(f"/api/requests/{request_id}/approve", json=approval_data)
+            assert response.status_code == 200
+            
+            # Second approval (authoriser)
+            app.dependency_overrides[get_current_user] = mock_authoriser_user
+            
+            approval_data = {
+                "role": "authoriser", 
+                "decision": "approved",
+                "comments": "Authoriser approval"
+            }
+            
+            response = client.post(f"/api/requests/{request_id}/approve", json=approval_data)
+            assert response.status_code == 200
+            
+            # Check final status - use admin user
+            def mock_admin_user():
+                return UserInfo(
+                    user_id="admin_user",
+                    email="admin@cruise.com",
+                    name="Admin User", 
+                    roles=[UserRole.ADMIN.value]
+                )
+                
+            app.dependency_overrides[get_current_user] = mock_admin_user
+            response = client.get(f"/api/requests/{request_id}")
+            assert response.status_code == 200
+            assert response.json()["status"] == RequestStatus.APPROVED.value
 
 
 class TestOPAPolicies:
