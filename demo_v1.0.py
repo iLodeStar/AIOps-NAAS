@@ -265,6 +265,138 @@ def demo_compliance_checking():
         print(f"    ❌ {violation.rule_name}: {violation.description}")
         print(f"       Remediation: {violation.remediation_suggestions[0] if violation.remediation_suggestions else 'N/A'}")
 
+def demo_post_incident_review():
+    """Demo post-incident review and learning system"""
+    print_section("V1.0 POST-INCIDENT REVIEW & LEARNING DEMO")
+    
+    from post_incident_review.incident_analyzer import IncidentAnalyzer, EventType, RootCauseCategory
+    from post_incident_review.pattern_recognizer import PatternRecognizer, PatternType
+    from post_incident_review.effectiveness_assessor import EffectivenessAssessor, EffectivenessLevel
+    from post_incident_review.learning_engine import LearningEngine, ImplementationStatus
+    
+    print_subsection("1. Incident Timeline Reconstruction")
+    
+    # Create sample incident data
+    sample_incident = {
+        "incident_id": "INC-2024-001",
+        "start_time": "2024-01-15T09:15:00",
+        "resolution_time": "2024-01-15T09:25:00", 
+        "alerts": [
+            {
+                "timestamp": "2024-01-15T09:15:00",
+                "source": "satellite_monitor",
+                "message": "Satellite link quality degraded",
+                "severity": "high"
+            }
+        ],
+        "symptoms": [
+            {
+                "timestamp": "2024-01-15T09:14:30",
+                "system": "communication",
+                "description": "Increased packet loss on primary satellite link"
+            }
+        ],
+        "remediation_actions": [
+            {
+                "start_time": "2024-01-15T09:17:00",
+                "end_time": "2024-01-15T09:19:00",
+                "action_name": "satellite_failover",
+                "result": "success"
+            }
+        ]
+    }
+    
+    analyzer = IncidentAnalyzer()
+    timeline = analyzer.reconstruct_timeline(sample_incident)
+    
+    print(f"✓ Timeline reconstructed for {timeline.incident_id}")
+    print(f"  - Duration: {timeline.total_duration_minutes:.1f} minutes")
+    print(f"  - Detection delay: {timeline.detection_delay_minutes:.1f} minutes")
+    print(f"  - Resolution time: {timeline.resolution_time_minutes:.1f} minutes")
+    print(f"  - Events captured: {len(timeline.events)}")
+    
+    print_subsection("2. Root Cause Analysis")
+    
+    root_cause = analyzer.analyze_root_cause(timeline, {
+        "network_latency": 150,
+        "packet_loss": 5,
+        "signal_strength": -85
+    })
+    
+    print(f"✓ Root cause identified: {root_cause.primary_cause.value}")
+    print(f"  - Confidence: {root_cause.confidence_score:.1%}")
+    print(f"  - Evidence points: {len(root_cause.evidence)}")
+    print(f"  - Recommendations: {len(root_cause.recommendations)}")
+    
+    print_subsection("3. Pattern Recognition")
+    
+    # Sample historical incident data
+    incidents_data = [
+        {"incident_id": "INC-001", "start_time": "2024-01-15T09:15:00", "affected_systems": ["satellite"], "root_cause_analysis": {"primary_cause": "network_issue"}},
+        {"incident_id": "INC-002", "start_time": "2024-01-15T14:30:00", "affected_systems": ["satellite"], "root_cause_analysis": {"primary_cause": "network_issue"}},
+        {"incident_id": "INC-003", "start_time": "2024-01-16T09:45:00", "affected_systems": ["satellite"], "root_cause_analysis": {"primary_cause": "network_issue"}},
+        {"incident_id": "INC-004", "start_time": "2024-01-17T14:20:00", "affected_systems": ["navigation"], "root_cause_analysis": {"primary_cause": "hardware_failure"}},
+    ]
+    
+    pattern_recognizer = PatternRecognizer()
+    patterns = pattern_recognizer.analyze_incidents(incidents_data)
+    
+    print(f"✓ Patterns identified: {len(patterns)}")
+    for pattern in patterns[:3]:  # Show top 3
+        print(f"  - {pattern.description} (confidence: {pattern.confidence:.1%})")
+    
+    print_subsection("4. Effectiveness Assessment")
+    
+    # Sample remediation history
+    remediation_history = [
+        {"scenario_id": "satellite_failover", "scenario_name": "Satellite Failover", "timestamp": "2024-01-15T09:17:00", "success": True, "resolution_time_minutes": 8},
+        {"scenario_id": "satellite_failover", "scenario_name": "Satellite Failover", "timestamp": "2024-01-16T14:20:00", "success": True, "resolution_time_minutes": 12},
+        {"scenario_id": "satellite_failover", "scenario_name": "Satellite Failover", "timestamp": "2024-01-17T11:30:00", "success": False, "resolution_time_minutes": 45},
+        {"scenario_id": "satellite_failover", "scenario_name": "Satellite Failover", "timestamp": "2024-01-18T16:15:00", "success": True, "resolution_time_minutes": 6},
+        {"scenario_id": "satellite_failover", "scenario_name": "Satellite Failover", "timestamp": "2024-01-19T10:45:00", "success": True, "resolution_time_minutes": 10},
+    ]
+    
+    assessor = EffectivenessAssessor()
+    assessment = assessor.assess_remediation_effectiveness(remediation_history, "satellite_failover")
+    
+    print(f"✓ Effectiveness assessed for satellite_failover scenario")
+    print(f"  - Success rate: {assessment.successful_attempts}/{assessment.total_attempts} ({assessment.successful_attempts/max(assessment.total_attempts,1):.1%})")
+    print(f"  - Average resolution: {assessment.average_resolution_time_minutes:.1f} minutes")
+    print(f"  - Overall effectiveness: {assessment.overall_effectiveness.value}")
+    print(f"  - Recommendations: {len(assessment.recommendations)}")
+    
+    print_subsection("5. Learning Engine")
+    
+    learning_engine = LearningEngine()
+    current_confidence = {"satellite_failover": 0.75}
+    current_policies = {"min_confidence_auto": 0.7, "max_blast_radius": 5}
+    
+    learning_cycle = learning_engine.run_learning_cycle(
+        incident_timelines=[timeline],
+        root_cause_analyses=[root_cause],
+        incident_patterns=patterns,
+        effectiveness_assessments=[assessment],
+        current_confidence_scores=current_confidence,
+        current_policies=current_policies
+    )
+    
+    print(f"✓ Learning cycle completed: {learning_cycle.cycle_id}")
+    print(f"  - Confidence adjustments suggested: {len(learning_cycle.confidence_adjustments)}")
+    print(f"  - Policy recommendations: {len(learning_cycle.policy_recommendations)}")
+    print(f"  - New scenarios suggested: {len(learning_cycle.new_scenarios_suggested)}")
+    print(f"  - Effectiveness improvements identified: {len(learning_cycle.effectiveness_improvements)}")
+    
+    # Show sample learning insights
+    if learning_cycle.confidence_adjustments:
+        adj = learning_cycle.confidence_adjustments[0]
+        print(f"\n📊 Sample Confidence Adjustment:")
+        print(f"  - Scenario: {adj.scenario_id}")
+        print(f"  - Current → Suggested: {adj.current_confidence:.2f} → {adj.suggested_confidence:.2f}")
+        print(f"  - Reason: {adj.adjustment_reason}")
+    
+    if learning_cycle.effectiveness_improvements:
+        print(f"\n🎯 Sample Improvement: {learning_cycle.effectiveness_improvements[0]}")
+
 def demo_system_integration():
     """Demo complete system integration"""
     print_section("V1.0 INTEGRATED SYSTEM DEMO")
@@ -300,6 +432,7 @@ async def main():
         await demo_auto_remediation()
         demo_drift_monitoring()
         demo_compliance_checking()
+        demo_post_incident_review()
         demo_system_integration()
         
         print(f"\n🎉 v1.0 Demo completed successfully!")
