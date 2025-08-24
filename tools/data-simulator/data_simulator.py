@@ -161,7 +161,8 @@ class DataSimulator:
         es_no = snr + random.gauss(4.0, 0.5)
         
         # BER correlates inversely with SNR
-        ber_base = config['ber']['base']
+        ber_config = config['ber']
+        ber_base = float(ber_config['base'])  # Ensure it's a float
         if snr < 8:
             ber = ber_base * random.uniform(100, 1000)  # High BER for poor SNR
         elif snr < 12:
