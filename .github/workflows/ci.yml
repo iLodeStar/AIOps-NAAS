@@ -109,13 +109,13 @@ jobs:
           echo "Neither 'docker compose' nor 'docker-compose' is available"
           exit 1
         fi
-        sleep 30  # Wait for services to start
+        sleep 60  # Wait for services to start
     
     - name: Wait for services to be ready
       run: |
-        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || true
-        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || true
-        timeout 120 bash -c 'until curl -s http://localhost:9093/api/v1/status > /dev/null; do echo "Waiting for Alertmanager..."; sleep 5; done' || true
+        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
+        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
+        timeout 180 bash -c 'until curl -s http://localhost:9093/api/v1/status > /dev/null; do echo "Waiting for Alertmanager..."; sleep 5; done' || echo "Alertmanager health check timeout"
     
     - name: Run v0.3 integration tests
       run: |
@@ -212,7 +212,7 @@ jobs:
           echo "Neither 'docker compose' nor 'docker-compose' is available"
           exit 1
         fi
-        sleep 30  # Wait for services to start
+        sleep 60  # Wait for services to start
     
     - name: Wait for services to be ready
       run: |
@@ -339,13 +339,13 @@ jobs:
           echo "Neither 'docker compose' nor 'docker-compose' is available"
           exit 1
         fi
-        sleep 45  # Wait longer for all services to start
+        sleep 90  # Wait longer for all services to start
     
     - name: Wait for services to be ready
       run: |
-        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || true
-        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || true
-        timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null; do echo "Waiting for NATS..."; sleep 5; done' || true
+        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
+        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
+        timeout 180 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null; do echo "Waiting for NATS..."; sleep 5; done' || echo "NATS health check timeout"
     
     - name: Run data simulator
       run: |
