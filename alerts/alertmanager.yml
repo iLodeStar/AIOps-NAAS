@@ -1,0 +1,29 @@
+global:
+  smtp_smarthost: 'mailhog:1025'
+  smtp_from: 'aiops@ship-01.cruise.local'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'ship-alerts'
+
+receivers:
+  - name: 'ship-alerts'
+    email_configs:
+      - to: 'ops@cruise.local'
+        html: |
+          <h2>AIOps Alert: {{ .GroupLabels.alertname }}</h2>
+          {{ range .Alerts }}
+          <p><strong>Alert:</strong> {{ .Annotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Severity:</strong> {{ .Labels.severity }}</p>
+          <p><strong>Ship:</strong> {{ .Labels.ship }}</p>
+          <p><strong>Service:</strong> {{ .Labels.service }}</p>
+          <p><strong>Starts:</strong> {{ .StartsAt }}</p>
+          <hr>
+          {{ end }}

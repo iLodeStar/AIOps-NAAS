@@ -29,6 +29,27 @@ Success: Proactive degradation alerts; safe semi-automatic remediation; reliable
 
 Success: Central visibility across ships; capacity planning; consistent SLO reporting.
 
+## v0.5 — Multi-Tenant Core + Tenant Labeling & RBAC
+- Multi-tenant control plane with strong isolation:
+  - Keycloak: realm-per-tenant (or groups/roles), SSO across Ops Console, Grafana, and Argo CD.
+  - Grafana: organizations per tenant; folders/datasources scoped; dashboards restricted per tenant.
+  - Argo CD: Projects per tenant; ApplicationSet to stamp per-ship apps using tenant overlays.
+- Data isolation and limits:
+  - ClickHouse: tenant_id and ship_id columns; Row Level Security (RLS) policies; user quotas; partitions include tenant_id; materialized views per tenant.
+  - VictoriaMetrics/Mimir: per-tenant IDs/headers; per-tenant retention, cardinality, and sample rate limits; relabel rules inject tenant/ship labels.
+  - NATS JetStream: subject prefixes tenant.ship.*; streams/consumers per tenant with retention and size limits.
+  - Qdrant (RAG): collection per tenant; separated encryption keys.
+  - Object storage: bucket/prefix per tenant; separate IAM policies.
+  - Secrets: SOPS keys per tenant; key rotation policy.
+  - MLflow: experiments and model names per tenant; segregated artifact stores.
+- Labeling/Tagging standard applied at source:
+  - Required labels: tenant_id, client_id, ship_id, environment, cluster, region, app, component, version, incident_id, runbook_id.
+  - Enforce via Prometheus relabeling and Vector/Fluent Bit processors; validate in CI.
+- Observability, audit, and usage:
+  - Per-tenant audit for runbooks (AWX + OPA); usage/quotas metrics; optional billing hooks.
+
+Success: Per-tenant isolation verified (no cross-tenant queries), RBAC enforced end-to-end, per-tenant quotas/retention applied, and fleet dashboards scoped by tenant.
+
 ## v1.0 — Self-Learning Closed-Loop
 - ✅ Confidence-scored auto-remediation for known scenarios; expand policy coverage gradually.
 - ✅ Drift monitoring; periodic retraining/promotion via MLflow; shadow deployments.

@@ -1,0 +1,51 @@
+# Vector configuration for AIOps NAAS
+# Simplified config that tails logs and forwards them
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# Source: Tail log files from sample-logs directory
+[sources.sample_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+ignore_older_secs = 86400
+read_from = "beginning"
+
+# Transform: Add basic metadata to logs
+[transforms.parse_logs]
+type = "remap"
+inputs = ["sample_logs"]
+source = '''
+  .timestamp = now()
+  .level = "INFO"
+  .message = .message
+  .source = "vector"
+  .host = "ship-01"
+  .service = "unknown"
+  .raw_log = .message
+  .labels = {"environment": "local", "version": "1.0.0"}
+'''
+
+# Sink: Console output for debugging
+[sinks.console]
+type = "console"
+inputs = ["parse_logs"]
+
+[sinks.console.encoding]
+codec = "json"
+
+# Sink: Send logs to ClickHouse
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parse_logs"]
+endpoint = "http://clickhouse:8123"
+table = "logs.raw"
+database = "logs"
+compression = "gzip"
+skip_unknown_fields = true
+
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER:-default}"
+password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"

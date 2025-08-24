@@ -1,0 +1,468 @@
+name: aiops-naas
+
+services:
+  # ClickHouse - Log storage with MergeTree engine
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: aiops-clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native interface
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse123}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # VictoriaMetrics - Metrics storage
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: aiops-victoria-metrics
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm_data:/victoria-metrics-data
+    command:
+      - --storageDataPath=/victoria-metrics-data
+      - --httpListenAddr=:8428
+      - --retentionPeriod=1y
+      - --maxConcurrentInserts=8
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # VictoriaMetrics Agent - Scrapes metrics and sends to VictoriaMetrics
+  vmagent:
+    image: victoriametrics/vmagent:latest
+    container_name: aiops-vmagent
+    volumes:
+      - ./vmagent/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - vmagent_data:/vmagentdata
+    command:
+      - --promscrape.config=/etc/prometheus/prometheus.yml
+      - --remoteWrite.url=http://victoria-metrics:8428/api/v1/write
+    depends_on:
+      - victoria-metrics
+      - node-exporter
+    restart: unless-stopped
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: aiops-node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - '/:/host:ro,rslave'
+    restart: unless-stopped
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: aiops-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_PLUGIN_BACKGROUNDINSTALLER_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - victoria-metrics
+      - clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Qdrant - Vector database for RAG
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aiops-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # Ollama - LLM inference engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aiops-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # NATS - Message bus with JetStream
+  nats:
+    image: nats:alpine
+    container_name: aiops-nats
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+    command: 
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--http_port=8222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # MailHog - Local SMTP testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: aiops-mailhog
+    ports:
+      - "8025:8025"  # Web UI
+      - "1025:1025"  # SMTP
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8025/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Vector - Log processing and routing
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: aiops-vector
+    volumes:
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+      - ./sample-logs:/var/log/sample:ro
+      - vector_data:/var/lib/vector
+    command: ["--config", "/etc/vector/vector.toml"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8686/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # VMAlert - Alert manager for VictoriaMetrics
+  vmalert:
+    image: victoriametrics/vmalert:latest
+    container_name: aiops-vmalert
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./alerts/system-alerts.yml:/etc/alerts/alerts.yml:ro
+    command:
+      - --rule=/etc/alerts/alerts.yml
+      - --datasource.url=http://victoria-metrics:8428
+      - --notifier.url=http://alertmanager:9093
+      - --httpListenAddr=:8880
+      - --evaluationInterval=30s
+      - --external.url=http://localhost:8880
+    depends_on:
+      - victoria-metrics
+      - alertmanager
+    restart: unless-stopped
+
+  # Alertmanager - Handle alerts and route to MailHog
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: aiops-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alerts/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:9093
+      - --cluster.listen-address=
+    depends_on:
+      - mailhog
+    restart: unless-stopped
+
+  # River Anomaly Detection Service - v0.2 streaming anomaly detection
+  anomaly-detection:
+    build:
+      context: ./services/anomaly-detection
+      dockerfile: Dockerfile
+    container_name: aiops-anomaly-detection
+    ports:
+      - "8080:8080"
+    environment:
+      - VICTORIA_METRICS_URL=http://victoria-metrics:8428
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=INFO
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Benthos - Stream processing for event correlation
+  benthos:
+    image: jeffail/benthos:latest
+    container_name: aiops-benthos
+    ports:
+      - "4195:4195"  # HTTP API
+    volumes:
+      - ./benthos/benthos.yaml:/benthos.yaml:ro
+    command: ["-c", "/benthos.yaml"]
+    depends_on:
+      nats:
+        condition: service_healthy
+      victoria-metrics:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4195/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Incident API - REST API for incident management
+  incident-api:
+    build:
+      context: ./services/incident-api
+      dockerfile: Dockerfile
+    container_name: aiops-incident-api
+    ports:
+      - "8081:8081"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # v0.3 Services - Predictive Link Health + Guarded Auto-Remediation
+
+  # Link Health Service - Predictive satellite link degradation
+  link-health:
+    build:
+      context: ./services/link-health
+      dockerfile: Dockerfile
+    container_name: aiops-link-health
+    ports:
+      - "8082:8082"
+    environment:
+      - NATS_URL=nats://nats:4222
+      - VICTORIA_METRICS_URL=http://victoria-metrics:8428
+    depends_on:
+      nats:
+        condition: service_healthy
+      victoria-metrics:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Remediation Service - Guarded auto-remediation with approval workflows
+  remediation:
+    build:
+      context: ./services/remediation
+      dockerfile: Dockerfile
+    container_name: aiops-remediation
+    ports:
+      - "8083:8083"
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OPA_URL=http://opa:8181
+    depends_on:
+      nats:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Open Policy Agent - Policy enforcement for remediation actions
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: aiops-opa
+    ports:
+      - "8181:8181"
+    command: 
+      - "run"
+      - "--server"
+      - "--config-file=/config/config.json"
+      - "/policies"
+    volumes:
+      - ./opa/config.json:/config/config.json:ro
+      - ./opa/policies:/policies:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8181/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # v0.4 Services - Fleet Reporting, Capacity Forecasting, Cross-Ship Benchmarking
+
+  # Fleet Aggregation Service - Central fleet data collection and aggregation  
+  fleet-aggregation:
+    build:
+      context: ./services/fleet-aggregation
+      dockerfile: Dockerfile
+    container_name: aiops-fleet-aggregation
+    ports:
+      - "8084:8084"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Capacity Forecasting Service - Seasonal traffic and capacity prediction
+  capacity-forecasting:
+    build:
+      context: ./services/capacity-forecasting
+      dockerfile: Dockerfile
+    container_name: aiops-capacity-forecasting
+    ports:
+      - "8085:8085"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Cross-Ship Benchmarking Service - Performance comparison and correlation analysis
+  cross-ship-benchmarking:
+    build:
+      context: ./services/cross-ship-benchmarking
+      dockerfile: Dockerfile
+    container_name: aiops-cross-ship-benchmarking
+    ports:
+      - "8086:8086"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  clickhouse_data:
+  vm_data:
+  vmagent_data:
+  grafana_data:
+  qdrant_data:
+  ollama_data:
+  nats_data:
+  vector_data:
+  alertmanager_data:

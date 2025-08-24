@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remediation-service
+  labels:
+    app: remediation
+    component: automation
+    version: v0.3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remediation
+  template:
+    metadata:
+      labels:
+        app: remediation
+        component: automation
+        version: v0.3
+    spec:
+      containers:
+      - name: remediation
+        image: aiops/remediation:v0.3
+        ports:
+        - containerPort: 8083
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: OPA_URL
+          value: "http://opa:8181"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: remediation-service
+  labels:
+    app: remediation
+spec:
+  selector:
+    app: remediation
+  ports:
+  - port: 8083
+    targetPort: 8083
+    name: http
+  type: ClusterIP
