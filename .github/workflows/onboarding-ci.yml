@@ -98,9 +98,9 @@ jobs:
       
       - name: Setup OPA
         run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/v0.58.0/opa_linux_amd64_static
-          chmod 755 opa
-          sudo mv opa /usr/local/bin/
+          curl -L -o opa_binary https://openpolicyagent.org/downloads/v0.58.0/opa_linux_amd64_static
+          chmod 755 opa_binary
+          sudo mv opa_binary /usr/local/bin/opa
       
       - name: Validate OPA policies
         run: |

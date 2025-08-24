@@ -9,6 +9,7 @@ import hmac
 import hashlib
 
 from fastapi import Request, HTTPException, status, Depends
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
