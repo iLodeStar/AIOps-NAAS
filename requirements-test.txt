@@ -1,0 +1,19 @@
+# Core testing dependencies
+pytest>=8.0.0
+pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
+
+# Core application dependencies  
+requests>=2.31.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Data generation and processing
+faker>=20.0.0
+
+# Optional dependencies for enhanced features
+# asyncio-mqtt>=0.13.0
+# paho-mqtt>=1.6.0
+
+# Development and CI dependencies
+coverage>=7.0.0

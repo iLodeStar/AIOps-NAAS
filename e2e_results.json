@@ -1,0 +1,231 @@
+{
+  "test_run_id": "e2e_1756044633",
+  "started_at": "2025-08-24T14:10:33.137082",
+  "alerts_generated": 6,
+  "policy_evaluations": 6,
+  "approvals_processed": 2,
+  "executions_attempted": 6,
+  "audit_entries": 6,
+  "success_rate": 83.33333333333334,
+  "errors": [],
+  "test_scenarios": [
+    {
+      "scenario": "satellite_degradation",
+      "severity": "high",
+      "duration_seconds": 2.503191,
+      "success": true,
+      "alert": "AlertEvent(alert_id='alert_0001_satellite_degradation', timestamp='2025-08-24T14:10:33.137318', severity=<AlertSeverity.HIGH: 'high'>, alert_type='link_health.satellite_degradation', description='Satellite link quality degradation detected', metrics={'snr_db': 4.5, 'ber': 0.001, 'signal_strength_dbm': -75}, source_system='link_health_service', affected_services=['crew-wifi', 'guest-wifi', 'pos-system'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0001_satellite_degradation', alert_id='alert_0001_satellite_degradation', allowed=True, recommended_action=<RemediationAction.SATELLITE_FAILOVER: 'satellite_failover'>, approval_required=True, risk_assessment='high', reason='Auto-selected satellite_failover based on link_health.satellite_degradation and high severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0001_satellite_degradation', alert_id='alert_0001_satellite_degradation', action=<RemediationAction.SATELLITE_FAILOVER: 'satellite_failover'>, status='completed', started_at='2025-08-24T14:10:33.638214', completed_at='2025-08-24T14:10:35.640353', dry_run=True, success=True, error_message='', rollback_available=True)",
+      "audit": {
+        "audit_id": "audit_alert_0001_satellite_degradation",
+        "timestamp": "2025-08-24T14:10:35.640462",
+        "alert": {
+          "alert_id": "alert_0001_satellite_degradation",
+          "severity": "high",
+          "type": "link_health.satellite_degradation",
+          "description": "Satellite link quality degradation detected"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0001_satellite_degradation",
+          "action": "satellite_failover",
+          "approval_required": true,
+          "risk_assessment": "high"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0001_satellite_degradation",
+          "status": "completed",
+          "success": true,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    },
+    {
+      "scenario": "weather_impact",
+      "severity": "medium",
+      "duration_seconds": 1.001477,
+      "success": true,
+      "alert": "AlertEvent(alert_id='alert_0002_weather_impact', timestamp='2025-08-24T14:10:35.841026', severity=<AlertSeverity.MEDIUM: 'medium'>, alert_type='link_health.weather_impact', description='Weather-related signal attenuation', metrics={'rain_fade_margin_db': 1.2, 'signal_strength_dbm': -80}, source_system='link_health_service', affected_services=['guest-wifi'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0002_weather_impact', alert_id='alert_0002_weather_impact', allowed=True, recommended_action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, approval_required=False, risk_assessment='medium', reason='Auto-selected antenna_adjustment based on link_health.weather_impact and medium severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0002_weather_impact', alert_id='alert_0002_weather_impact', action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, status='completed', started_at='2025-08-24T14:10:35.841128', completed_at='2025-08-24T14:10:36.842287', dry_run=True, success=True, error_message='', rollback_available=True)",
+      "audit": {
+        "audit_id": "audit_alert_0002_weather_impact",
+        "timestamp": "2025-08-24T14:10:36.842419",
+        "alert": {
+          "alert_id": "alert_0002_weather_impact",
+          "severity": "medium",
+          "type": "link_health.weather_impact",
+          "description": "Weather-related signal attenuation"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0002_weather_impact",
+          "action": "antenna_adjustment",
+          "approval_required": false,
+          "risk_assessment": "medium"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0002_weather_impact",
+          "status": "completed",
+          "success": true,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    },
+    {
+      "scenario": "network_congestion",
+      "severity": "critical",
+      "duration_seconds": 0.801612,
+      "success": true,
+      "alert": "AlertEvent(alert_id='alert_0003_network_congestion', timestamp='2025-08-24T14:10:37.043002', severity=<AlertSeverity.CRITICAL: 'critical'>, alert_type='link_health.network_congestion', description='Network congestion detected', metrics={'interface_utilization': 95, 'packet_loss': 5.5, 'latency_ms': 500}, source_system='link_health_service', affected_services=['all-services'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0003_network_congestion', alert_id='alert_0003_network_congestion', allowed=True, recommended_action=<RemediationAction.BANDWIDTH_REDUCTION: 'bandwidth_reduction'>, approval_required=True, risk_assessment='critical', reason='Auto-selected bandwidth_reduction based on link_health.network_congestion and critical severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0003_network_congestion', alert_id='alert_0003_network_congestion', action=<RemediationAction.BANDWIDTH_REDUCTION: 'bandwidth_reduction'>, status='completed', started_at='2025-08-24T14:10:37.543929', completed_at='2025-08-24T14:10:37.844407', dry_run=True, success=True, error_message='', rollback_available=True)",
+      "audit": {
+        "audit_id": "audit_alert_0003_network_congestion",
+        "timestamp": "2025-08-24T14:10:37.844540",
+        "alert": {
+          "alert_id": "alert_0003_network_congestion",
+          "severity": "critical",
+          "type": "link_health.network_congestion",
+          "description": "Network congestion detected"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0003_network_congestion",
+          "action": "bandwidth_reduction",
+          "approval_required": true,
+          "risk_assessment": "critical"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0003_network_congestion",
+          "status": "completed",
+          "success": true,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    },
+    {
+      "scenario": "equipment_failure",
+      "severity": "high",
+      "duration_seconds": 1.001532,
+      "success": false,
+      "alert": "AlertEvent(alert_id='alert_0004_equipment_failure', timestamp='2025-08-24T14:10:38.045114', severity=<AlertSeverity.HIGH: 'high'>, alert_type='link_health.equipment_failure', description='Critical equipment failure', metrics={'temperature_celsius': 85, 'error_count': 150}, source_system='link_health_service', affected_services=['navigation-system', 'safety-system'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0004_equipment_failure', alert_id='alert_0004_equipment_failure', allowed=True, recommended_action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, approval_required=False, risk_assessment='high', reason='Auto-selected antenna_adjustment based on link_health.equipment_failure and high severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0004_equipment_failure', alert_id='alert_0004_equipment_failure', action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, status='failed', started_at='2025-08-24T14:10:38.045233', completed_at='2025-08-24T14:10:39.046405', dry_run=True, success=False, error_message='Simulated execution failure for antenna_adjustment', rollback_available=False)",
+      "audit": {
+        "audit_id": "audit_alert_0004_equipment_failure",
+        "timestamp": "2025-08-24T14:10:39.046555",
+        "alert": {
+          "alert_id": "alert_0004_equipment_failure",
+          "severity": "high",
+          "type": "link_health.equipment_failure",
+          "description": "Critical equipment failure"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0004_equipment_failure",
+          "action": "antenna_adjustment",
+          "approval_required": false,
+          "risk_assessment": "high"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0004_equipment_failure",
+          "status": "failed",
+          "success": false,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    },
+    {
+      "scenario": "satellite_degradation",
+      "severity": "low",
+      "duration_seconds": 0.50098,
+      "success": true,
+      "alert": "AlertEvent(alert_id='alert_0005_satellite_degradation', timestamp='2025-08-24T14:10:39.247129', severity=<AlertSeverity.LOW: 'low'>, alert_type='link_health.satellite_degradation', description='Satellite link quality degradation detected', metrics={'snr_db': 4.5, 'ber': 0.001, 'signal_strength_dbm': -75}, source_system='link_health_service', affected_services=['crew-wifi', 'guest-wifi', 'pos-system'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0005_satellite_degradation', alert_id='alert_0005_satellite_degradation', allowed=True, recommended_action=<RemediationAction.QOS_SHAPING: 'qos_shaping'>, approval_required=False, risk_assessment='low', reason='Auto-selected qos_shaping based on link_health.satellite_degradation and low severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0005_satellite_degradation', alert_id='alert_0005_satellite_degradation', action=<RemediationAction.QOS_SHAPING: 'qos_shaping'>, status='completed', started_at='2025-08-24T14:10:39.247223', completed_at='2025-08-24T14:10:39.747913', dry_run=True, success=True, error_message='', rollback_available=True)",
+      "audit": {
+        "audit_id": "audit_alert_0005_satellite_degradation",
+        "timestamp": "2025-08-24T14:10:39.748036",
+        "alert": {
+          "alert_id": "alert_0005_satellite_degradation",
+          "severity": "low",
+          "type": "link_health.satellite_degradation",
+          "description": "Satellite link quality degradation detected"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0005_satellite_degradation",
+          "action": "qos_shaping",
+          "approval_required": false,
+          "risk_assessment": "low"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0005_satellite_degradation",
+          "status": "completed",
+          "success": true,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    },
+    {
+      "scenario": "weather_impact",
+      "severity": "critical",
+      "duration_seconds": 1.001499,
+      "success": true,
+      "alert": "AlertEvent(alert_id='alert_0006_weather_impact', timestamp='2025-08-24T14:10:39.948635', severity=<AlertSeverity.CRITICAL: 'critical'>, alert_type='link_health.weather_impact', description='Weather-related signal attenuation', metrics={'rain_fade_margin_db': 1.2, 'signal_strength_dbm': -80}, source_system='link_health_service', affected_services=['guest-wifi'])",
+      "decision": "PolicyDecision(decision_id='policy_alert_0006_weather_impact', alert_id='alert_0006_weather_impact', allowed=True, recommended_action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, approval_required=False, risk_assessment='critical', reason='Auto-selected antenna_adjustment based on link_health.weather_impact and critical severity', constraints={'max_execution_time_minutes': 10, 'rollback_required': True, 'dry_run_first': True})",
+      "execution": "ExecutionResult(execution_id='exec_alert_0006_weather_impact', alert_id='alert_0006_weather_impact', action=<RemediationAction.ANTENNA_ADJUSTMENT: 'antenna_adjustment'>, status='completed', started_at='2025-08-24T14:10:39.948745', completed_at='2025-08-24T14:10:40.949923', dry_run=True, success=True, error_message='', rollback_available=True)",
+      "audit": {
+        "audit_id": "audit_alert_0006_weather_impact",
+        "timestamp": "2025-08-24T14:10:40.950052",
+        "alert": {
+          "alert_id": "alert_0006_weather_impact",
+          "severity": "critical",
+          "type": "link_health.weather_impact",
+          "description": "Weather-related signal attenuation"
+        },
+        "policy_decision": {
+          "decision_id": "policy_alert_0006_weather_impact",
+          "action": "antenna_adjustment",
+          "approval_required": false,
+          "risk_assessment": "critical"
+        },
+        "execution": {
+          "execution_id": "exec_alert_0006_weather_impact",
+          "status": "completed",
+          "success": true,
+          "dry_run": true
+        },
+        "compliance": {
+          "policy_followed": true,
+          "audit_trail_complete": true,
+          "data_retention_compliant": true
+        }
+      }
+    }
+  ],
+  "completed_at": "2025-08-24T14:10:41.150467",
+  "total_duration_seconds": 8.013385
+}
