@@ -363,10 +363,9 @@ services:
     command: 
       - "run"
       - "--server"
-      - "--config-file=/config/config.json"
+      - "--addr=0.0.0.0:8181"
       - "/policies"
     volumes:
-      - ./opa/config.json:/config/config.json:ro
       - ./opa/policies:/policies:ro
     restart: unless-stopped
     healthcheck:

@@ -98,22 +98,23 @@ jobs:
       
       - name: Setup OPA
         run: |
-          curl -L -o opa_binary https://openpolicyagent.org/downloads/v0.58.0/opa_linux_amd64_static
-          chmod 755 opa_binary
-          sudo mv opa_binary /usr/local/bin/opa
+          # Use Docker to run OPA instead of downloading binary due to firewall restrictions
+          docker pull openpolicyagent/opa:latest
+          echo "Using containerized OPA due to firewall restrictions on openpolicyagent.org"
       
       - name: Validate OPA policies
         run: |
-          echo "Validating onboarding policies..."
-          opa fmt opa/policies/onboarding.rego
-          opa fmt opa/policies/service-actions.rego
+          echo "Validating onboarding policies using Docker..."
+          # Use Docker to run OPA fmt instead of local binary
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest fmt /policies/onboarding.rego
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest fmt /policies/service-actions.rego
           
           echo "Testing policy syntax..."
-          opa test opa/policies/ || echo "No policy tests found - creating basic validation"
+          docker run --rm -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest test /policies/ || echo "No policy tests found - creating basic validation"
       
       - name: Test policy decisions
         run: |
-          echo "Testing approval policy..."
+          echo "Testing approval policy using Docker..."
           
           # Test valid deployer approval
           echo '{
@@ -122,9 +123,9 @@ jobs:
               "request": {"requester_id": "req1", "status": "submitted"},
               "approval": {"role": "deployer", "existing_approvals": []}
             }
-          }' | opa eval -d opa/policies/onboarding.rego "data.onboarding.approval.allowed"
+          }' | docker run --rm -i -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest eval -d /policies/onboarding.rego "data.onboarding.approval.allowed"
           
-          echo "Testing execution policy..."
+          echo "Testing execution policy using Docker..."
           
           # Test valid two-level approval execution
           echo '{
@@ -136,7 +137,7 @@ jobs:
                 {"role": "authoriser", "approver_id": "auth1", "approved_at": "2024-01-01T10:30:00Z"}
               ]
             }
-          }' | opa eval -d opa/policies/onboarding.rego "data.onboarding.execution.allowed"
+          }' | docker run --rm -i -v $(pwd)/opa/policies:/policies openpolicyagent/opa:latest eval -d /policies/onboarding.rego "data.onboarding.execution.allowed"
 
   build-docker-image:
     name: Build Docker Image
@@ -198,7 +199,7 @@ jobs:
           bandit -r . || echo "Security issues found - review bandit-report.json"
       
       - name: Upload security scan results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: security-scan-results
@@ -231,6 +232,9 @@ jobs:
           --health-retries 5
         ports:
           - 8181:8181
+        cmd: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+        volumes:
+          - ./opa/policies:/policies:ro
     
     steps:
       - name: Checkout code
