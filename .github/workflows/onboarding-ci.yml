@@ -80,7 +80,7 @@ jobs:
           python tests/test_integration.py
       
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         if: always()
         with:
           file: ${{ env.SERVICE_PATH }}/coverage.xml
