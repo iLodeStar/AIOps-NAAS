@@ -1,0 +1,94 @@
+{
+  "drift_detection": {
+    "adwin_delta": 0.002,
+    "ph_threshold": 50,
+    "ph_alpha": 0.9999,
+    "ks_reference_size": 1000,
+    "ks_detection_size": 100,
+    "performance_window": 50,
+    "behavioral_window": 100
+  },
+  "compliance_rules": [
+    {
+      "rule_id": "solas_001",
+      "name": "Navigation System Availability",
+      "framework": "solas",
+      "description": "Navigation systems must maintain 99.9% availability",
+      "severity": "critical",
+      "automated_check": true,
+      "check_function": "check_navigation_availability",
+      "parameters": {"min_availability": 0.999},
+      "enabled": true
+    },
+    {
+      "rule_id": "solas_002",
+      "name": "Emergency Communication Backup", 
+      "framework": "solas",
+      "description": "Emergency communication systems must have redundancy",
+      "severity": "critical",
+      "automated_check": true,
+      "check_function": "check_communication_redundancy",
+      "enabled": true
+    },
+    {
+      "rule_id": "marpol_001",
+      "name": "Emission Monitoring",
+      "framework": "marpol",
+      "description": "Emission levels must be continuously monitored and logged",
+      "severity": "high",
+      "automated_check": true,
+      "check_function": "check_emission_monitoring",
+      "enabled": true
+    },
+    {
+      "rule_id": "gdpr_001", 
+      "name": "Personal Data Encryption",
+      "framework": "gdpr",
+      "description": "Personal data must be encrypted at rest and in transit",
+      "severity": "high",
+      "automated_check": true,
+      "check_function": "check_data_encryption",
+      "enabled": true
+    }
+  ],
+  "ml_platform": {
+    "mlflow_tracking_uri": "http://localhost:5000",
+    "model_promotion_thresholds": {
+      "accuracy": 0.85,
+      "precision": 0.80,
+      "recall": 0.80
+    },
+    "shadow_deployment_duration_hours": 24,
+    "retraining_triggers": {
+      "drift_detection": true,
+      "performance_degradation": 0.10,
+      "schedule_days": 7
+    }
+  },
+  "change_management": {
+    "maintenance_windows": [
+      {"name": "daily_maintenance", "schedule": "02:00-06:00", "type": "routine"},
+      {"name": "weekly_maintenance", "schedule": "sunday:02:00-08:00", "type": "extended"}
+    ],
+    "approval_workflows": {
+      "low_risk": {"approvers": 1, "timeout_hours": 2},
+      "medium_risk": {"approvers": 2, "timeout_hours": 8},
+      "high_risk": {"approvers": 3, "timeout_hours": 24},
+      "critical": {"approvers": 4, "timeout_hours": 72}
+    }
+  },
+  "post_incident_review": {
+    "auto_trigger_thresholds": {
+      "duration_minutes": 30,
+      "severity_levels": ["high", "critical"],
+      "affected_systems_count": 3
+    },
+    "analysis_components": [
+      "timeline_reconstruction",
+      "root_cause_analysis", 
+      "impact_assessment",
+      "remediation_effectiveness",
+      "learning_extraction"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "policies": [
+    {
+      "rule_id": "auto_satellite_failover",
+      "scenario_id": "satellite_failover",
+      "min_confidence": 0.80,
+      "max_blast_radius": 2,
+      "allowed_systems": ["satellite_modem", "backup_modem", "routing"],
+      "forbidden_systems": ["navigation", "safety_systems"],
+      "time_windows": ["00:00-23:59"],
+      "approval_required": false,
+      "enabled": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "last_modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "rule_id": "auto_bandwidth_throttling",
+      "scenario_id": "bandwidth_throttling",
+      "min_confidence": 0.75,
+      "max_blast_radius": 5,
+      "allowed_systems": ["qos", "traffic_shaper", "firewall"],
+      "forbidden_systems": ["emergency_comms", "navigation"],
+      "time_windows": ["00:00-23:59"],
+      "approval_required": false,
+      "enabled": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "last_modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "rule_id": "manual_service_restart",
+      "scenario_id": "service_restart",
+      "min_confidence": 0.90,
+      "max_blast_radius": 1,
+      "allowed_systems": [],
+      "forbidden_systems": ["critical_navigation", "safety_systems", "propulsion"],
+      "time_windows": ["02:00-06:00", "weekdays:10:00-16:00"],
+      "approval_required": true,
+      "enabled": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "last_modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "rule_id": "auto_route_optimization",
+      "scenario_id": "route_optimization", 
+      "min_confidence": 0.85,
+      "max_blast_radius": 3,
+      "allowed_systems": ["routing", "switches", "load_balancer"],
+      "forbidden_systems": ["navigation", "safety_systems"],
+      "time_windows": ["02:00-06:00"],
+      "approval_required": false,
+      "enabled": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "last_modified": "2024-01-01T00:00:00Z"
+    }
+  ]
+}

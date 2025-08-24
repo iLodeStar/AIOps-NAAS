@@ -1,0 +1,198 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiops-v1-config
+  namespace: aiops-naas
+data:
+  config.json: |
+    {
+      "drift_detection": {
+        "adwin_delta": 0.002,
+        "ph_threshold": 50,
+        "ph_alpha": 0.9999,
+        "ks_reference_size": 1000,
+        "ks_detection_size": 100,
+        "performance_window": 50,
+        "behavioral_window": 100
+      },
+      "ml_platform": {
+        "mlflow_tracking_uri": "http://mlflow-service:5000",
+        "model_promotion_thresholds": {
+          "accuracy": 0.85,
+          "precision": 0.80,
+          "recall": 0.80
+        },
+        "shadow_deployment_duration_hours": 24,
+        "retraining_triggers": {
+          "drift_detection": true,
+          "performance_degradation": 0.10,
+          "schedule_days": 7
+        }
+      },
+      "change_management": {
+        "maintenance_windows": [
+          {"name": "daily_maintenance", "schedule": "02:00-06:00", "type": "routine"},
+          {"name": "weekly_maintenance", "schedule": "sunday:02:00-08:00", "type": "extended"}
+        ],
+        "approval_workflows": {
+          "low_risk": {"approvers": 1, "timeout_hours": 2},
+          "medium_risk": {"approvers": 2, "timeout_hours": 8},
+          "high_risk": {"approvers": 3, "timeout_hours": 24},
+          "critical": {"approvers": 4, "timeout_hours": 72}
+        }
+      },
+      "post_incident_review": {
+        "auto_trigger_thresholds": {
+          "duration_minutes": 30,
+          "severity_levels": ["high", "critical"],
+          "affected_systems_count": 3
+        },
+        "analysis_components": [
+          "timeline_reconstruction",
+          "root_cause_analysis", 
+          "impact_assessment",
+          "remediation_effectiveness",
+          "learning_extraction"
+        ]
+      }
+    }
+  remediation_scenarios.json: |
+    {
+      "scenarios": [
+        {
+          "scenario_id": "satellite_failover",
+          "name": "Satellite Link Failover",
+          "description": "Automatic failover to backup satellite link on primary failure",
+          "success_rate": 0.92,
+          "execution_count": 45,
+          "risk_level": "medium",
+          "prerequisites": ["backup_link_available", "signal_quality_check"],
+          "rollback_available": true
+        },
+        {
+          "scenario_id": "bandwidth_throttling", 
+          "name": "Emergency Bandwidth Throttling",
+          "description": "Reduce non-critical traffic during link degradation",
+          "success_rate": 0.88,
+          "execution_count": 78,
+          "risk_level": "low",
+          "prerequisites": ["traffic_classification"],
+          "rollback_available": true
+        }
+      ]
+    }
+  remediation_policies.json: |
+    {
+      "policies": [
+        {
+          "rule_id": "auto_satellite_failover",
+          "scenario_id": "satellite_failover",
+          "min_confidence": 0.80,
+          "max_blast_radius": 2,
+          "allowed_systems": ["satellite_modem", "backup_modem", "routing"],
+          "forbidden_systems": ["navigation", "safety_systems"],
+          "time_windows": ["00:00-23:59"],
+          "approval_required": false,
+          "enabled": true
+        }
+      ]
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-v1-orchestrator
+  namespace: aiops-naas
+  labels:
+    app: aiops-v1
+    component: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiops-v1
+      component: orchestrator
+  template:
+    metadata:
+      labels:
+        app: aiops-v1
+        component: orchestrator
+    spec:
+      containers:
+      - name: orchestrator
+        image: aiops-naas/v1-orchestrator:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: CONFIG_PATH
+          value: "/etc/aiops/config.json"
+        - name: SCENARIOS_PATH
+          value: "/etc/aiops/remediation_scenarios.json"
+        - name: POLICIES_PATH  
+          value: "/etc/aiops/remediation_policies.json"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow-service:5000"
+        - name: OPA_ENDPOINT
+          value: "http://opa-service:8181"
+        - name: AWX_ENDPOINT
+          value: "http://awx-service:8080"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/aiops
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      volumes:
+      - name: config
+        configMap:
+          name: aiops-v1-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiops-v1-orchestrator
+  namespace: aiops-naas
+  labels:
+    app: aiops-v1
+    component: orchestrator
+spec:
+  selector:
+    app: aiops-v1
+    component: orchestrator
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aiops-v1-orchestrator
+  namespace: aiops-naas
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: aiops-v1
+      component: orchestrator
