@@ -32,24 +32,18 @@ jobs:
     - name: Install Python dependencies
       run: |
         pip install pytest pytest-cov pytest-asyncio
-        pip install requests fastapi uvicorn nats-py httpx faker
-        # Install requirements from services if they exist
-        if [ -f "requirements-test.txt" ]; then
-          pip install -r requirements-test.txt
-        fi
+        pip install requests fastapi uvicorn nats-py
     
     - name: Run unit tests with coverage
       run: |
         python -m pytest tests/ -v \
-          --ignore=tests/e2e/test_simulator_soak.py \
           --cov=src \
           --cov=services \
           --cov-report=xml:coverage.xml \
           --cov-report=html:htmlcov \
           --cov-report=term \
-          --cov-fail-under=80 \
-          --junitxml=junit-unit.xml \
-          --tb=short
+          --cov-fail-under=90 \
+          --junitxml=junit-unit.xml
     
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4
@@ -81,41 +75,21 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install pytest pytest-asyncio requests fastapi uvicorn nats-py httpx faker
-        # Install requirements from services if they exist
-        if [ -f "requirements-test.txt" ]; then
-          pip install -r requirements-test.txt
-        fi
+        pip install pytest pytest-asyncio requests fastapi uvicorn nats-py
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 60  # Wait for services to start
+        docker compose up -d
+        sleep 30  # Wait for services to start
     
     - name: Wait for services to be ready
       run: |
-        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:9093/api/v1/status > /dev/null; do echo "Waiting for Alertmanager..."; sleep 5; done' || echo "Alertmanager health check timeout"
+        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || true
+        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || true
+        timeout 120 bash -c 'until curl -s http://localhost:9093/api/v1/status > /dev/null; do echo "Waiting for Alertmanager..."; sleep 5; done' || true
     
     - name: Run v0.3 integration tests
       run: |
@@ -173,14 +147,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down
 
   system:
     name: System Tests
@@ -195,24 +162,8 @@ jobs:
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 60  # Wait for services to start
+        docker compose up -d
+        sleep 30  # Wait for services to start
     
     - name: Wait for services to be ready
       run: |
@@ -287,14 +238,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down
 
   e2e:
     name: End-to-End Tests
@@ -311,41 +255,21 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install requests fastapi uvicorn nats-py asyncio-mqtt faker httpx
-        # Install requirements from root if they exist
-        if [ -f "requirements-test.txt" ]; then
-          pip install -r requirements-test.txt
-        fi
+        pip install requests fastapi uvicorn nats-py asyncio-mqtt faker
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 90  # Wait longer for all services to start
+        docker compose up -d
+        sleep 45  # Wait longer for all services to start
     
     - name: Wait for services to be ready
       run: |
-        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null; do echo "Waiting for NATS..."; sleep 5; done' || echo "NATS health check timeout"
+        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || true
+        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || true
+        timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null; do echo "Waiting for NATS..."; sleep 5; done' || true
     
     - name: Run data simulator
       run: |
@@ -443,14 +367,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down
 
   reporting:
     name: Generate Reports
