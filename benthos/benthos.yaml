@@ -6,15 +6,12 @@ http:
   address: "0.0.0.0:4195"
   debug_endpoints: true
 
-# Input: Consume anomaly events from NATS JetStream
+# Input: Consume anomaly events from NATS (basic, not JetStream)
 input:
-  nats_jetstream:
+  nats:
     urls: ["nats://nats:4222"]
     subject: "anomaly.detected"
     queue: "correlation_processor"
-    deliver: "all"
-    ack_wait: "30s"
-    max_ack_pending: 1000
 
 # Pipeline for event processing and correlation
 pipeline:
@@ -160,10 +157,9 @@ output:
     pattern: fan_out
     outputs:
       # Send to NATS for incident management
-      - nats_jetstream:
+      - nats:
           urls: ["nats://nats:4222"]
           subject: "incidents.created"
-          max_in_flight: 64
           
       # Log to console for debugging  
       - stdout: {}
@@ -184,8 +180,7 @@ cache_resources:
 
 # Metrics and monitoring
 metrics:
-  prometheus:
-    prefix: "benthos"
+  prometheus: {}
     
 logger:
   level: INFO

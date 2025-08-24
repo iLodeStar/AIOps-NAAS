@@ -256,24 +256,24 @@ class AnomalyDetectionService:
         ]
     
     async def connect_nats(self):
-        """Connect to NATS JetStream"""
+        """Connect to NATS"""
         try:
             self.nats_client = NATS()
             await self.nats_client.connect("nats://nats:4222")
             
-            # Create stream for anomaly events (simplified without JetStream for now)
+            # Simple connection - no JetStream for now to avoid complexity
             logger.info("Connected to NATS")
             self.health_status["nats_connected"] = True
                 
         except Exception as e:
             logger.error(f"Failed to connect to NATS: {e}")
             self.health_status["nats_connected"] = False
-            raise
+            # Don't raise, continue without NATS for now
     
     async def publish_anomaly(self, event: AnomalyEvent):
         """Publish anomaly event to NATS"""
         try:
-            if not self.nats_client:
+            if not self.nats_client or self.nats_client.is_closed:
                 logger.warning("NATS not connected, cannot publish anomaly")
                 return
             
