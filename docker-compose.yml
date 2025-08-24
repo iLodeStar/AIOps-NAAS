@@ -229,6 +229,55 @@ services:
       - mailhog
     restart: unless-stopped
 
+  # River Anomaly Detection Service - v0.2 streaming anomaly detection
+  anomaly-detection:
+    build:
+      context: ./services/anomaly-detection
+      dockerfile: Dockerfile
+    container_name: aiops-anomaly-detection
+    ports:
+      - "8080:8080"
+    environment:
+      - VICTORIA_METRICS_URL=http://victoria-metrics:8428
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=INFO
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Benthos - Stream processing for event correlation
+  benthos:
+    image: jeffail/benthos:latest
+    container_name: aiops-benthos
+    ports:
+      - "4195:4195"  # HTTP API
+    volumes:
+      - ./benthos/benthos.yaml:/benthos.yaml:ro
+    command: ["-c", "/benthos.yaml"]
+    depends_on:
+      nats:
+        condition: service_healthy
+      victoria-metrics:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4195/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   clickhouse_data:
   vm_data:

@@ -1,0 +1,193 @@
+# Benthos configuration for AIOps NAAS v0.2 Event Correlation
+# This configuration implements rule-based correlation, deduplication, and suppression
+
+http:
+  enabled: true
+  address: "0.0.0.0:4195"
+  debug_endpoints: true
+
+# Input: Consume anomaly events from NATS JetStream
+input:
+  nats_jetstream:
+    urls: ["nats://nats:4222"]
+    subject: "anomaly.detected"
+    queue: "correlation_processor"
+    deliver: "all"
+    ack_wait: "30s"
+    max_ack_pending: 1000
+
+# Pipeline for event processing and correlation
+pipeline:
+  processors:
+    # Parse and enrich anomaly events
+    - mapping: |
+        root.correlation_id = uuid_v4()
+        root.processing_timestamp = now()
+        
+        # Extract ship and service information from original event
+        root.ship_id = if this.labels.instance != null {
+          this.labels.instance
+        } else {
+          "ship-01"
+        }
+        
+        root.service = if this.labels.job != null {
+          this.labels.job  
+        } else {
+          "unknown"
+        }
+        
+        # Add severity based on anomaly score
+        root.severity = if this.anomaly_score > 0.9 {
+          "critical"
+        } else if this.anomaly_score > 0.7 {
+          "warning"  
+        } else {
+          "info"
+        }
+              
+    # Deduplication based on metric name, ship, and time window
+    - dedupe:
+        cache: "dedupe_cache"
+        key: "${! json(\"metric_name\") + json(\"ship_id\") }"
+        drop_on_err: false
+        
+    # Store event for correlation
+    - cache:
+        resource: "correlation_cache"  
+        operator: "set"
+        key: "${! json(\"metric_name\") + \"_\" + json(\"ship_id\") }"
+        value: "${! content() }"
+        ttl: "300s"  # 5 minute correlation window
+        
+    # Fetch related metrics for correlation
+    - cache:
+        resource: "correlation_cache"
+        operator: "get"  
+        key: "${! if json(\"metric_name\") == \"cpu_usage\" { \"memory_usage_\" + json(\"ship_id\") } else if json(\"metric_name\") == \"memory_usage\" { \"cpu_usage_\" + json(\"ship_id\") } else { \"\" } }"
+        
+    # Create correlated incident
+    - mapping: |
+        root.incident_type = "single_anomaly"
+        
+        # Check if we have a correlated metric
+        let related = if meta("cache_result").type() == "string" {
+          meta("cache_result").parse_json() 
+        } else {
+          null
+        }
+        
+        # Create correlated incident if both CPU and memory are anomalous
+        root.incident_type = if related != null && 
+          ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
+           (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
+          "resource_pressure"
+        } else {
+          "single_anomaly"
+        }
+        
+        # Add correlation details
+        root.correlated_events = if related != null {
+          [this, related]  
+        } else {
+          [this]
+        }
+        
+        # Calculate incident severity
+        root.incident_severity = if this.severity == "critical" || (related != null && related.severity == "critical") {
+          "critical"
+        } else if this.severity == "warning" || (related != null && related.severity == "warning") {
+          "warning"
+        } else {
+          "info"
+        }
+        
+    # Suppression - check if similar incident exists
+    - cache:
+        resource: "suppression_cache"
+        operator: "get"
+        key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
+        
+    # Only process if not suppressed
+    - switch:
+      - check: meta("cache_result") == ""
+        processors:
+          # Mark as processed to suppress similar incidents
+          - cache:
+              resource: "suppression_cache"
+              operator: "set" 
+              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
+              value: "suppressed"
+              ttl: "300s"  # Suppress for 5 minutes
+              
+          # Create final incident event
+          - mapping: |
+              root.event_type = "incident"
+              root.incident_id = uuid_v4()
+              root.created_at = now()
+              root.updated_at = now()
+              root.status = "open"
+              root.acknowledged = false
+              
+              # Create timeline entry
+              root.timeline = [
+                {
+                  "timestamp": now(),
+                  "event": "incident_created",
+                  "description": "Incident created by anomaly correlation",
+                  "source": "benthos_correlation"
+                }
+              ]
+              
+              # Add runbook suggestions based on incident type
+              root.suggested_runbooks = if this.incident_type == "resource_pressure" {
+                ["investigate_high_resource_usage", "scale_resources"]
+              } else if this.metric_name == "cpu_usage" {
+                ["investigate_cpu_usage"]  
+              } else if this.metric_name == "memory_usage" {
+                ["investigate_memory_usage"]
+              } else {
+                ["generic_investigation"]
+              }
+
+      # Drop suppressed events
+      - processors:
+          - mapping: "root = deleted()"
+
+# Output: Send correlated incidents to multiple destinations
+output:
+  broker:
+    pattern: fan_out
+    outputs:
+      # Send to NATS for incident management
+      - nats_jetstream:
+          urls: ["nats://nats:4222"]
+          subject: "incidents.created"
+          max_in_flight: 64
+          
+      # Log to console for debugging  
+      - stdout: {}
+
+# Caching resources for deduplication, correlation, and suppression
+cache_resources:
+  - label: "dedupe_cache"
+    memory:
+      default_ttl: "300s"
+      
+  - label: "correlation_cache" 
+    memory:
+      default_ttl: "600s"
+      
+  - label: "suppression_cache"
+    memory:
+      default_ttl: "300s"
+
+# Metrics and monitoring
+metrics:
+  prometheus:
+    prefix: "benthos"
+    
+logger:
+  level: INFO
+  format: json
+  add_timestamp: true

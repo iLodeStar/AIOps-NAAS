@@ -35,16 +35,17 @@ inputs = ["parse_logs"]
 [sinks.console.encoding]
 codec = "json"
 
-# Sink: Send logs to ClickHouse (temporarily disabled due to DNS issues)
-# [sinks.clickhouse]
-# type = "clickhouse"
-# inputs = ["parse_logs"]
-# endpoint = "http://clickhouse:8123"
-# table = "logs.raw"
-# database = "logs"
-# compression = "gzip"
+# Sink: Send logs to ClickHouse
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parse_logs"]
+endpoint = "http://clickhouse:8123"
+table = "logs.raw"
+database = "logs"
+compression = "gzip"
+skip_unknown_fields = true
 
-# [sinks.clickhouse.auth]
-# strategy = "basic"
-# user = "${CLICKHOUSE_USER:-default}"
-# password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER:-default}"
+password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
