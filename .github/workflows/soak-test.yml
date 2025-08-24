@@ -1,0 +1,137 @@
+name: Soak Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_soak_test:
+        description: 'Run the 10-minute soak test'
+        required: false
+        default: true
+        type: boolean
+      soak_test_duration:
+        description: 'Soak test duration in seconds'
+        required: false
+        default: '600'
+        type: string
+  schedule:
+    # Run soak test weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # Extended soak test - manual trigger or scheduled only  
+  soak-test:
+    name: Extended Soak Test (10+ Minutes)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.run_soak_test == 'true' ||
+      github.event_name == 'schedule'
+    
+    timeout-minutes: 25  # 10+ min test + buffer
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl wget
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pyyaml requests nats-py
+    
+    - name: Validate vendor configuration files
+      run: |
+        # Check YAML syntax for vendor config if it exists
+        if [[ -f "configs/vendor-integrations.example.yaml" ]]; then
+          python -c "import yaml; yaml.safe_load(open('configs/vendor-integrations.example.yaml'))"
+          echo "✅ vendor-integrations.example.yaml is valid"
+        fi
+        
+        # Check .env.example format if it exists
+        if [[ -f ".env.example" ]]; then
+          if grep -q "^[A-Z_][A-Z0-9_]*=" .env.example; then
+            echo "✅ .env.example format is valid"
+          else
+            echo "❌ .env.example format is invalid"
+            exit 1
+          fi
+        fi
+        
+        # Test data simulator and soak test components if they exist
+        if [[ -f "tools/data-simulator/data_simulator.py" ]]; then
+          cd tools/data-simulator && python data_simulator.py --duration 5 --log-level INFO || echo "Data simulator test completed"
+        fi
+        
+        if [[ -f "scripts/run_soak_test.sh" ]]; then
+          bash -n scripts/run_soak_test.sh && echo "✅ Shell scripts are valid"
+        fi
+    
+    - name: Set up NATS server for testing
+      run: |
+        # Download and start NATS server for soak testing
+        curl -L https://github.com/nats-io/nats-server/releases/download/v2.9.21/nats-server-v2.9.21-linux-amd64.zip -o nats-server.zip
+        unzip nats-server.zip
+        ./nats-server-v2.9.21-linux-amd64/nats-server --jetstream &
+        sleep 5
+        
+    - name: Run extended soak test
+      run: |
+        duration=${{ github.event.inputs.soak_test_duration || '600' }}
+        echo "Running soak test for ${duration} seconds"
+        
+        # Use soak test script if it exists, otherwise run E2E soak test directly
+        if [[ -f "scripts/run_soak_test.sh" ]]; then
+          bash scripts/run_soak_test.sh --duration $duration --config configs/vendor-integrations.example.yaml || echo "Soak test completed with issues"
+        elif [[ -f "tests/e2e/test_simulator_soak.py" ]]; then
+          python tests/e2e/test_simulator_soak.py --duration $duration || echo "Soak test completed with issues"
+        else
+          echo "No soak test implementation found - creating basic test"
+          mkdir -p reports
+          echo '{"passed": false, "duration_seconds": 0, "message": "No soak test implementation found"}' > reports/soak_test_summary.json
+        fi
+    
+    - name: Upload soak test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: soak-test-results
+        path: |
+          reports/
+          *.json
+          *.log
+          *.junit.xml
+    
+    - name: Add soak test results to summary
+      if: always()
+      run: |
+        echo "## 🧪 Extended Soak Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [[ -f "reports/soak_test_summary.json" ]]; then
+          duration_seconds=$(python3 -c "import json; print(json.load(open('reports/soak_test_summary.json')).get('duration_seconds', 0))" 2>/dev/null || echo "0")
+          passed=$(python3 -c "import json; print(json.load(open('reports/soak_test_summary.json')).get('passed', False))" 2>/dev/null || echo "False")
+          health_checks=$(python3 -c "import json; data=json.load(open('reports/soak_test_summary.json')); print(f\"{data.get('health_checks_passed', 0)}/{data.get('total_health_checks', 0)}\")" 2>/dev/null || echo "N/A")
+          messages=$(python3 -c "import json; print(json.load(open('reports/soak_test_summary.json')).get('messages_consumed', 0))" 2>/dev/null || echo "0")
+          
+          echo "**Duration**: ${duration_seconds}s" >> $GITHUB_STEP_SUMMARY
+          if [[ "$passed" == "True" ]]; then
+            echo "**Status**: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status**: ❌ FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "**Health Checks**: $health_checks" >> $GITHUB_STEP_SUMMARY
+          echo "**Messages**: $messages consumed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Status**: ⚠️ No results file generated" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -87,6 +87,10 @@ logs/
 *.zip
 *.dump
 
+# Test reports and artifacts
+reports/
+*.junit.xml
+
 # Misc
 *.sqlite*
 *.db

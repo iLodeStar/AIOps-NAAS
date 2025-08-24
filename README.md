@@ -9,6 +9,7 @@ An AI-powered network observability and operations platform tailored for cruise 
 - Cost-sensitive: prefer open source or free frameworks.
 
 ## Key Capabilities
+- **Configurable Vendor Integration**: Support for multiple satellite VSAT vendors, network device protocols (SNMP, NetFlow, Syslog), and data rates through YAML configuration and environment variables
 - Self-learning anomaly detection (streaming + online models)
 - Event correlation across logs, metrics, and traces
 - Predictive link degradation alerts (e.g., rain fade, dish misalignment)
@@ -17,6 +18,7 @@ An AI-powered network observability and operations platform tailored for cruise 
 - Fleet-wide dashboards and centralized control plane
 - Rich LLM copilot with RAG over SOPs/configs/incident history
 - Email alerting with local spooling during outages
+- **Comprehensive Testing**: 10-minute soak test suite for system validation and performance monitoring
 
 ## Architecture
 See docs/architecture.md for details, including a Mermaid diagram (all labels quoted) and a full component breakdown.
@@ -36,8 +38,29 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 
 ## Getting Started
 1. Clone the repo.
-2. Read docs/architecture.md to understand the edge+core design.
-3. Review docs/roadmap.md for implementation status and milestones.
+2. **Configure for your environment**: Copy and customize vendor-specific parameters
+3. Read docs/architecture.md to understand the edge+core design.
+4. Review docs/roadmap.md for implementation status and milestones.
+
+## Configuration
+**Vendor Integration**: The platform supports configurable integration with various satellite VSAT vendors, network protocols, and external systems:
+
+```bash
+# Copy and customize configuration templates
+cp configs/vendor-integrations.example.yaml configs/vendor-integrations.yaml
+cp .env.example .env
+
+# Configure vendor models, data rates, and protocols
+# See docs/configuration/vendor-config.md for detailed instructions
+```
+
+**Key Configuration Areas**:
+- **Satellite RF Equipment**: VSAT vendor APIs, SNMP endpoints, KPI mapping
+- **Network Devices**: Syslog, SNMP, NetFlow/sFlow protocols and polling
+- **Applications**: Health check endpoints and SLA monitoring
+- **External Context**: Weather APIs, NMEA navigation, scheduling feeds
+
+For complete configuration instructions, see **[Vendor Configuration Guide](docs/configuration/vendor-config.md)**.
 
 ## Local Bootstrap
 Get started quickly with the complete local development environment:
@@ -71,6 +94,32 @@ python3 test_v04_integration.py
 - 📊 **Fleet Reporting**: Multi-ship aggregation and centralized dashboards
 - 📈 **Capacity Forecasting**: ML-based traffic prediction and resource planning
 - ⚖️ **Cross-Ship Benchmarking**: Performance comparison and optimization recommendations
+
+## Testing
+**Comprehensive Soak Testing**: Validate system operation with realistic workloads:
+
+```bash
+# Run 10-minute soak test with data simulator
+bash scripts/run_soak_test.sh
+
+# Run with custom configuration and duration
+bash scripts/run_soak_test.sh --duration 300 --config configs/vendor-integrations.yaml
+
+# View comprehensive test results
+cat reports/soak-summary.json
+```
+
+**Integration Testing**: Validate v0.3/v0.4 features:
+
+```bash
+# Test v0.3 predictive and remediation features  
+python3 test_v03_integration.py
+
+# Test v0.4 fleet reporting and capacity forecasting
+python3 test_v04_integration.py
+```
+
+For complete testing procedures, see **[Test Plan](docs/testing/test-plan.md)**.
 
 ## v1.0 Self-Learning Closed-Loop Automation (NEW!)
 **Complete v1.0 implementation now available!**
