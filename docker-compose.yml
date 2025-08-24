@@ -278,6 +278,32 @@ services:
       retries: 3
       start_period: 30s
 
+  # Incident API - REST API for incident management
+  incident-api:
+    build:
+      context: ./services/incident-api
+      dockerfile: Dockerfile
+    container_name: aiops-incident-api
+    ports:
+      - "8081:8081"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
 volumes:
   clickhouse_data:
   vm_data:
