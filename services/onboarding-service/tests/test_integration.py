@@ -247,6 +247,13 @@ def test_standalone():
     logger.info("Testing standalone components...")
     
     try:
+        # Add parent directory to path for imports
+        import sys
+        import os
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
         # Test imports
         from app import app
         from models import OnboardingRequest, RequestStatus, UserRole
