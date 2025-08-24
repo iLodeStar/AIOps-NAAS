@@ -456,6 +456,41 @@ services:
       retries: 3
       start_period: 60s
 
+  # Onboarding Service - Secure ship/project onboarding with two-level approvals
+  onboarding-service:
+    build:
+      context: ./services/onboarding-service
+      dockerfile: Dockerfile
+    container_name: aiops-onboarding-service
+    ports:
+      - "8090:8090"
+    environment:
+      - DATABASE_URL=sqlite:///./data/onboarding.db
+      - OIDC_ISSUER_URL=http://keycloak:8080/realms/aiops
+      - OIDC_CLIENT_ID=onboarding-service
+      - OIDC_CLIENT_SECRET=${ONBOARDING_CLIENT_SECRET:-dev-secret}
+      - OIDC_REDIRECT_URI=http://localhost:8090/auth/callback
+      - SECRET_KEY=${ONBOARDING_SECRET_KEY:-dev-secret-key-change-in-production}
+      - OPA_URL=http://opa:8181
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_REPO_OWNER=iLodeStar
+      - GITHUB_REPO_NAME=AIOps-NAAS
+      - USE_MOCK_ACTIONS=true
+      - DEPLOY_DRY_RUN=true
+      - POLICY_MODE=enforcing
+    volumes:
+      - onboarding_data:/app/data
+    depends_on:
+      opa:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
 volumes:
   clickhouse_data:
   vm_data:
@@ -466,3 +501,4 @@ volumes:
   nats_data:
   vector_data:
   alertmanager_data:
+  onboarding_data:

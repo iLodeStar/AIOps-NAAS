@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - AIOps Onboarding{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h1><i class="fas fa-tachometer-alt"></i> Onboarding Dashboard</h1>
+        <p class="lead">Welcome to the AIOps ship and project onboarding service.</p>
+    </div>
+    <div class="col-md-4 text-end">
+        {% if can_create %}
+            <a href="/requests/new" class="btn btn-primary">
+                <i class="fas fa-plus"></i> New Request
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5>Quick Actions</h5>
+                    </div>
+                    <div>
+                        <i class="fas fa-rocket fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/requests" class="text-white text-decoration-none">
+                    <i class="fas fa-list"></i> View All Requests
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5>Pending Approvals</h5>
+                    </div>
+                    <div>
+                        <i class="fas fa-check-circle fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/requests?status=submitted" class="text-white text-decoration-none">
+                    <i class="fas fa-tasks"></i> Review Requests
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5>Ready to Deploy</h5>
+                    </div>
+                    <div>
+                        <i class="fas fa-play-circle fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/requests?status=approved" class="text-white text-decoration-none">
+                    <i class="fas fa-deploy"></i> Execute Deployments
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5>Audit Logs</h5>
+                    </div>
+                    <div>
+                        <i class="fas fa-history fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                {% if user.has_role('admin') or user.has_role('viewer') %}
+                    <a href="/admin" class="text-white text-decoration-none">
+                        <i class="fas fa-chart-line"></i> View Analytics
+                    </a>
+                {% else %}
+                    <span class="text-white-50">
+                        <i class="fas fa-lock"></i> Admin Access Required
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-12">
+        <h3>Your Role Permissions</h3>
+        <div class="row">
+            {% for role in user.roles %}
+                <div class="col-md-2 mb-2">
+                    <span class="badge bg-secondary p-2">
+                        <i class="fas fa-user-tag"></i> {{ role.title() }}
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+        
+        <div class="mt-3">
+            <h6>What you can do:</h6>
+            <ul class="list-unstyled">
+                {% if user.has_role('admin') %}
+                    <li><i class="fas fa-check text-success"></i> Full administrative access</li>
+                    <li><i class="fas fa-check text-success"></i> Create, approve, and execute all requests</li>
+                    <li><i class="fas fa-check text-success"></i> View audit logs and analytics</li>
+                {% else %}
+                    {% if user.has_role('requester') %}
+                        <li><i class="fas fa-check text-success"></i> Create and submit onboarding requests</li>
+                    {% endif %}
+                    {% if user.has_role('deployer') %}
+                        <li><i class="fas fa-check text-success"></i> Provide deployer approvals</li>
+                        <li><i class="fas fa-check text-success"></i> Execute approved deployments</li>
+                    {% endif %}
+                    {% if user.has_role('authoriser') %}
+                        <li><i class="fas fa-check text-success"></i> Provide authoriser approvals</li>
+                    {% endif %}
+                    {% if user.has_role('viewer') %}
+                        <li><i class="fas fa-check text-success"></i> View all requests and audit logs</li>
+                    {% endif %}
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <h3>Recent Activity</h3>
+        <div class="card">
+            <div class="card-body">
+                <p class="text-muted">
+                    <i class="fas fa-info-circle"></i> 
+                    Recent requests and approvals will be shown here. Click "View All Requests" to see the complete list.
+                </p>
+                <a href="/requests" class="btn btn-outline-primary">
+                    <i class="fas fa-list"></i> View All Requests
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
