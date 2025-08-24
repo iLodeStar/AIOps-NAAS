@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: link-health-service
+  labels:
+    app: link-health
+    component: predictive-analytics
+    version: v0.3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: link-health
+  template:
+    metadata:
+      labels:
+        app: link-health
+        component: predictive-analytics
+        version: v0.3
+    spec:
+      containers:
+      - name: link-health
+        image: aiops/link-health:v0.3
+        ports:
+        - containerPort: 8082
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: VICTORIA_METRICS_URL
+          value: "http://victoria-metrics:8428"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: link-health-service
+  labels:
+    app: link-health
+spec:
+  selector:
+    app: link-health
+  ports:
+  - port: 8082
+    targetPort: 8082
+    name: http
+  type: ClusterIP

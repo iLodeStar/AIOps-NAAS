@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: aiops-fleet
+  namespace: argocd
+spec:
+  description: AIOps NAAS Fleet Management Project
+  sourceRepos:
+  - 'https://github.com/iLodeStar/AIOps-NAAS'
+  - 'https://charts.helm.sh/stable'
+  - 'https://harbor.aiops.local/*'  # Harbor registry cache
+  destinations:
+  - namespace: 'aiops-*'
+    server: https://kubernetes.default.svc
+  - namespace: argocd
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRole
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: ''
+    kind: Service
+  - group: 'apps'
+    kind: Deployment
+  - group: 'apps'
+    kind: StatefulSet
+  - group: 'networking.k8s.io'
+    kind: Ingress
+  roles:
+  - name: fleet-operator
+    description: Fleet operations team
+    policies:
+    - p, proj:aiops-fleet:fleet-operator, applications, get, aiops-fleet/*, allow
+    - p, proj:aiops-fleet:fleet-operator, applications, sync, aiops-fleet/*, allow
+    - p, proj:aiops-fleet:fleet-operator, applications, override, aiops-fleet/*, allow
+    groups:
+    - fleet-ops

@@ -1,0 +1,15 @@
+{
+    "services": {
+        "authz": {
+            "url": "http://bundle-server:8888"
+        }
+    },
+    "bundles": {
+        "authz": {
+            "resource": "bundles/bundle.tar.gz"
+        }
+    },
+    "decision_logs": {
+        "console": true
+    }
+}

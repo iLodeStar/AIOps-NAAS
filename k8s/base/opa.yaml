@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  labels:
+    app: opa
+    component: policy
+    version: v0.3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+        component: policy
+        version: v0.3
+    spec:
+      containers:
+      - name: opa
+        image: openpolicyagent/opa:latest-envoy
+        ports:
+        - containerPort: 8181
+        args:
+        - "run"
+        - "--server"
+        - "--config-file=/config/config.json"
+        - "/policies"
+        volumeMounts:
+        - name: opa-config
+          mountPath: /config
+        - name: opa-policies
+          mountPath: /policies
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8181
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8181
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: opa-config
+        configMap:
+          name: opa-config
+      - name: opa-policies
+        configMap:
+          name: opa-policies
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  labels:
+    app: opa
+spec:
+  selector:
+    app: opa
+  ports:
+  - port: 8181
+    targetPort: 8181
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-config
+data:
+  config.json: |
+    {
+      "decision_logs": {
+        "console": true
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policies
+data:
+  remediation.rego: |
+    package remediation
+    
+    import rego.v1
+    
+    # Main allow policy for remediation actions
+    allow if {
+        input.action.risk_level in allowed_risk_levels
+        not rate_limit_exceeded
+        preconditions_met
+    }
+    
+    allowed_risk_levels := ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    
+    rate_limit_exceeded if {
+        recent_count := input.context.recent_actions_count
+        recent_count >= 10  # Simple rate limit
+    }
+    
+    preconditions_met := true  # Simplified for MVP

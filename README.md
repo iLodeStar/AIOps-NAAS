@@ -42,8 +42,26 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 ## Local Bootstrap
 Get started quickly with the complete local development environment:
 - **[Quickstart Guide](docs/quickstart.md)** - Docker Compose stack for v0.1 MVP testing
+- **[v0.3 Features Guide](docs/v0.3-features.md)** - Predictive Link Health + Guarded Auto-Remediation
 - **Stack includes**: ClickHouse, VictoriaMetrics, Grafana, Ollama, Qdrant, NATS, MailHog, Vector, VMAlert, Alertmanager
-- **One command setup**: `docker compose up -d` brings up the full observability stack
+- **v0.3 Services**: Link Health Predictor, Remediation Engine, Open Policy Agent
+
+### Quick Start v0.3
+```bash
+# Start the full stack including v0.3 services
+docker compose up -d
+
+# Test v0.3 predictive and remediation features  
+python3 test_v03_integration.py
+
+# Explore v0.3 APIs
+./test_v03_apis.sh
+```
+
+**New in v0.3**: 
+- 🔮 **Predictive Link Health**: ML-based satellite link degradation prediction with 15-min lead time
+- 🛡️ **Guarded Auto-Remediation**: Policy-driven automated remediation with approval workflows
+- 🔒 **Policy Enforcement**: OPA-based decision making for safe automation
 
 ## Contributing
 PRs welcome. Please discuss substantial changes via issues first. Follow conventional commits if possible.
