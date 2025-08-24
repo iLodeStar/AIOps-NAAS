@@ -97,3 +97,12 @@ reports/
 
 # Generated docs/artifacts
 site/
+
+# Test artifacts and simulation data
+simulation_data.jsonl
+simulation_data.csv
+e2e_results.json
+coverage.xml
+junit-*.xml
+.pytest_cache/
+tests/v1.0/test_v1_components.py.bak
