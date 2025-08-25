@@ -5,15 +5,31 @@ pytest-asyncio>=0.21.0
 
 # Core application dependencies  
 requests>=2.31.0
+httpx>=0.26.0
 fastapi>=0.104.0
 uvicorn>=0.24.0
+pydantic>=2.4.0
+
+# NATS messaging dependencies
+nats-py>=2.7.2
+
+# Database and data processing
+clickhouse-driver>=0.2.6
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
 
 # Data generation and processing
 faker>=20.0.0
 
-# Optional dependencies for enhanced features
-# asyncio-mqtt>=0.13.0
-# paho-mqtt>=1.6.0
+# Auth and security
+authlib>=1.3.0
+itsdangerous>=2.1.0
+sqlalchemy>=2.0.20
+jinja2>=3.1.0
 
 # Development and CI dependencies
 coverage>=7.0.0
+aiofiles>=23.0.0
+asyncio-mqtt>=0.16.0
+paho-mqtt>=1.6.0
