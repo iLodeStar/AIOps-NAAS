@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 # Install system dependencies  
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +12,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies with pre-compiled wheels where possible
-RUN pip install --no-cache-dir --only-binary=all -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
