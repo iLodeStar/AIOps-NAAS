@@ -64,7 +64,9 @@ For complete configuration instructions, see **[Vendor Configuration Guide](docs
 
 ## Local Bootstrap
 Get started quickly with the complete local development environment:
+- **[One-Click Setup](docs/deployment/one-click.md)** - Interactive wizard for beginners (recommended)
 - **[Quickstart Guide](docs/quickstart.md)** - Docker Compose stack for v0.1 MVP testing
+- **[Local & Non-Production Guide](docs/deployment/local-and-nonprod.md)** - Comprehensive manual setup
 - **[v0.3 Features Guide](docs/v0.3-features.md)** - Predictive Link Health + Guarded Auto-Remediation
 - **Stack includes**: ClickHouse, VictoriaMetrics, Grafana, Ollama, Qdrant, NATS, MailHog, Vector, VMAlert, Alertmanager
 - **v0.3 Services**: Link Health Predictor, Remediation Engine, Open Policy Agent
