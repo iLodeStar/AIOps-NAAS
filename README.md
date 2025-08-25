@@ -69,6 +69,78 @@ Get started quickly with the complete local development environment:
 - **Stack includes**: ClickHouse, VictoriaMetrics, Grafana, Ollama, Qdrant, NATS, MailHog, Vector, VMAlert, Alertmanager
 - **v0.3 Services**: Link Health Predictor, Remediation Engine, Open Policy Agent
 
+## Optional Services Guide
+
+### Quick Enable/Disable Optional Components
+
+The platform includes several optional services for enhanced functionality. Control them via `.env` file:
+
+```bash
+# Copy environment template and edit toggles
+cp .env.example .env
+```
+
+**Optional Service Toggles:**
+- `ENABLE_QDRANT=true|false` - Vector database for RAG/LLM functionality  
+- `ENABLE_BENTHOS=true|false` - Stream correlation and incident pipeline
+- `ENABLE_OLLAMA=true|false` - Local LLM inference engine
+
+### Start/Stop Individual Services
+
+```bash
+# Start optional services
+docker compose up -d qdrant ollama benthos
+
+# Stop optional services  
+docker compose stop qdrant ollama benthos
+
+# View service status
+docker compose ps qdrant ollama benthos
+```
+
+### Service Quick Links & Usage
+
+**🔍 Qdrant (Vector Database)**
+- Dashboard: [http://localhost:6333](http://localhost:6333) 
+- Check collections: `curl http://localhost:6333/collections | jq .`
+- Docs: [Qdrant Quick Start](https://qdrant.tech/documentation/quick-start/)
+
+**🤖 Ollama (LLM Runtime)**
+- API: [http://localhost:11434](http://localhost:11434)
+- **Recommended starter model**: `docker compose exec ollama ollama pull mistral`
+- Test API: `curl http://localhost:11434/api/generate -d '{"model":"mistral","prompt":"Explain AIOps:","stream":false}'`
+- Model library: [https://ollama.com/library](https://ollama.com/library)
+
+**🔀 Benthos (Stream Correlation)**
+- Config: `benthos/benthos.yaml`
+- Debug/metrics: [http://localhost:4195](http://localhost:4195)
+- Pipeline: `anomaly.detected` → correlation logic → `incidents.created`
+- Health: `docker compose logs -f benthos`
+
+### Recommended Service Start Order
+
+**1. Core Data Stack:**
+```bash
+docker compose up -d clickhouse victoria-metrics grafana nats
+```
+
+**2. Monitoring & Alerts (optional):**
+```bash
+docker compose up -d vmagent alertmanager vmalert mailhog vector
+```
+
+**3. Incident Pipeline:**
+```bash  
+docker compose up -d incident-api benthos
+```
+
+**4. AI/ML Stack:**
+```bash
+docker compose up -d qdrant ollama
+# Then install recommended model:
+docker compose exec ollama ollama pull mistral
+```
+
 ### Quick Start v0.3/v0.4
 ```bash
 # Start the full stack including v0.3/v0.4 services
@@ -94,6 +166,33 @@ python3 test_v04_integration.py
 - 📊 **Fleet Reporting**: Multi-ship aggregation and centralized dashboards
 - 📈 **Capacity Forecasting**: ML-based traffic prediction and resource planning
 - ⚖️ **Cross-Ship Benchmarking**: Performance comparison and optimization recommendations
+
+### Quick Links to UIs and APIs
+
+**Core Services:**
+- **Grafana Dashboards**: [http://localhost:3000](http://localhost:3000) (admin/admin)
+- **ClickHouse UI**: [http://localhost:8123/play](http://localhost:8123/play)  
+- **VictoriaMetrics**: [http://localhost:8428](http://localhost:8428)
+- **NATS Monitoring**: [http://localhost:8222](http://localhost:8222)
+
+**Optional Services:**
+- **Qdrant Dashboard**: [http://localhost:6333](http://localhost:6333)
+- **Benthos Debug**: [http://localhost:4195](http://localhost:4195)
+- **Ollama API**: [http://localhost:11434](http://localhost:11434)
+
+**Development:**
+- **Local Deployment Guide**: [docs/deployment/local-and-nonprod.md](docs/deployment/local-and-nonprod.md)
+- **Architecture Overview**: [docs/architecture.md](docs/architecture.md)
+- **Quickstart**: [docs/quickstart.md](docs/quickstart.md)
+
+### Troubleshooting Docker Build Failures
+
+If you encounter build failures with v0.4 services (capacity-forecasting, fleet-aggregation, cross-ship-benchmarking):
+
+**Common Issues:**
+- `Cannot connect to Docker daemon`: See [troubleshooting guide](docs/deployment/local-and-nonprod.md#15-troubleshooting)
+- `asyncio-nats-client not found`: Fixed in latest version (uses `nats-py` now)
+- `No matching distribution found`: SSL/network issue - try rebuilding later or check internet connection
 
 ## Testing
 **Comprehensive Soak Testing**: Validate system operation with realistic workloads:
