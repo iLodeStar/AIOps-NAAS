@@ -93,9 +93,9 @@ jobs:
     
     - name: Start services with docker-compose
       run: |
-        # Start only essential services for CI testing
+        # Start essential services for CI testing including v0.4 services
         echo "Starting essential services for CI testing..."
-        docker compose up -d clickhouse victoria-metrics grafana || echo "Some services failed to start, continuing..."
+        docker compose up -d clickhouse victoria-metrics grafana nats fleet-aggregation capacity-forecasting cross-ship-benchmarking || echo "Some services failed to start, continuing..."
         sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
@@ -104,6 +104,10 @@ jobs:
         timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null 2>&1; do echo "Waiting for VictoriaMetrics..."; sleep 10; done' || echo "VictoriaMetrics not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null 2>&1; do echo "Waiting for NATS..."; sleep 10; done' || echo "NATS not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8084/health > /dev/null 2>&1; do echo "Waiting for Fleet Aggregation..."; sleep 10; done' || echo "Fleet Aggregation not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8085/health > /dev/null 2>&1; do echo "Waiting for Capacity Forecasting..."; sleep 10; done' || echo "Capacity Forecasting not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8086/health > /dev/null 2>&1; do echo "Waiting for Cross-Ship Benchmarking..."; sleep 10; done' || echo "Cross-Ship Benchmarking not ready (continuing anyway)"
         echo "Service health check completed"
     
     - name: Run v0.3 integration tests
@@ -178,7 +182,7 @@ jobs:
     - name: Start services with docker-compose
       run: |
         echo "Starting essential services for system tests..."
-        docker compose up -d clickhouse victoria-metrics grafana || echo "Some services failed to start, continuing..."
+        docker compose up -d clickhouse victoria-metrics grafana nats fleet-aggregation capacity-forecasting cross-ship-benchmarking || echo "Some services failed to start, continuing..."
         sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
@@ -187,6 +191,10 @@ jobs:
         timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null 2>&1; do echo "Waiting for VictoriaMetrics..."; sleep 10; done' || echo "VictoriaMetrics not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null 2>&1; do echo "Waiting for NATS..."; sleep 10; done' || echo "NATS not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8084/health > /dev/null 2>&1; do echo "Waiting for Fleet Aggregation..."; sleep 10; done' || echo "Fleet Aggregation not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8085/health > /dev/null 2>&1; do echo "Waiting for Capacity Forecasting..."; sleep 10; done' || echo "Capacity Forecasting not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8086/health > /dev/null 2>&1; do echo "Waiting for Cross-Ship Benchmarking..."; sleep 10; done' || echo "Cross-Ship Benchmarking not ready (continuing anyway)"
         echo "System test service health check completed"
     
     - name: Run v0.3 API tests
@@ -287,7 +295,7 @@ jobs:
     - name: Start services with docker-compose
       run: |
         echo "Starting essential services for e2e tests..."
-        docker compose up -d clickhouse victoria-metrics grafana nats || echo "Some services failed to start, continuing..."
+        docker compose up -d clickhouse victoria-metrics grafana nats fleet-aggregation capacity-forecasting cross-ship-benchmarking || echo "Some services failed to start, continuing..."
         sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
@@ -297,6 +305,9 @@ jobs:
         timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
         timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null 2>&1; do echo "Waiting for NATS..."; sleep 10; done' || echo "NATS not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8084/health > /dev/null 2>&1; do echo "Waiting for Fleet Aggregation..."; sleep 10; done' || echo "Fleet Aggregation not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8085/health > /dev/null 2>&1; do echo "Waiting for Capacity Forecasting..."; sleep 10; done' || echo "Capacity Forecasting not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8086/health > /dev/null 2>&1; do echo "Waiting for Cross-Ship Benchmarking..."; sleep 10; done' || echo "Cross-Ship Benchmarking not ready (continuing anyway)"
         echo "E2E test service health check completed"
     
     - name: Run data simulator
