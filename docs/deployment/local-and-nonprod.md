@@ -1,472 +1,633 @@
-# Local and Non-Production Deployment Guide
+# Local and Non-Production Deployment Guide (Beginner Friendly)
 
-This guide covers deploying the AIOps NAAS platform in local development and non-production environments.
+This guide walks you through setting up the AIOps NAAS platform on your own computer for learning, demos, or team testing. It assumes no prior experience with Docker or backend systems.
 
-## Prerequisites
+- Target readers: first-time users and non-infra engineers
+- Estimated time: 15–30 minutes
+- Works on: macOS, Windows 10/11 (with WSL2), Linux (Ubuntu/Debian/Fedora)
 
-### System Requirements
+If you get stuck at any point, see the Troubleshooting section at the end.
 
-- **OS**: Linux (Ubuntu 20.04+), macOS, or Windows with WSL2
-- **Memory**: 8GB RAM minimum, 16GB recommended
-- **Storage**: 20GB free disk space
-- **CPU**: 4+ cores recommended for full stack
+References:
+- Edge vs Core architecture: ../architecture.md
+- Keycloak OIDC setup (step-by-step with screenshots): ../onboarding/oidc-keycloak-setup.md
+- Onboarding Service user guide: ../onboarding/guide.md
+- Production deployment (hardening, TLS, HA): ./production.md
 
-### Required Software
+---
 
-- **Docker**: Version 24.0+ with Docker Compose V2
-- **Python**: Version 3.10+ for testing and utilities
-- **Git**: For repository management
-- **curl/wget**: For health checks and API testing
+## What You Will Get
 
-### Installation Commands
+When you complete this guide, you will have a local AIOps stack running in Docker containers:
 
+- Data & Storage (“sinks”)
+  - [Edge/Core] ClickHouse: fast SQL database for events/logs
+  - [Edge/Core] VictoriaMetrics: time-series database for metrics
+  - [Edge/Core] Qdrant: vector database for AI embeddings (optional)
+- Platform Services
+  - [Edge] NATS: message bus for streaming data between services
+  - [Edge] Benthos/Vector: stream processing & log shipping (optional)
+- AIOps Microservices
+  - [Edge] Anomaly Detection: detects anomalies from telemetry streams
+  - [Edge] Incident API: stores and manages incidents
+  - [Edge] Link Health: predicts satellite link performance
+  - [Edge] Remediation: auto-remediation engine
+  - [Core] Fleet Aggregation (optional)
+  - [Core] Capacity Forecasting (optional)
+  - [Core] Cross-Ship Benchmarking (optional)
+- Monitoring & UI
+  - [Edge/Core] Grafana: dashboards and data exploration
+  - [Edge/Core] Alertmanager/VMAlert: alerting for metrics
+  - [Edge] MailHog: catch-all email inbox for alerts/tests
+- Authentication (optional but recommended for UI/API logins)
+  - [Core] Keycloak: identity provider (OIDC) for SSO/RBAC
+
+You’ll also run starter tests and learn how to explore data using both UI and command-line queries.
+
+---
+
+## Edge vs Core (Cloud) Components
+
+The platform is designed for “Edge” (on-ship) and “Core” (shore/cloud) deployment. Locally, you can run either or both. Full details and diagrams: ../architecture.md
+
+- Edge (Ship) — close to devices; resilient to low bandwidth/outages:
+  - [Edge] NATS, Vector/Benthos
+  - [Edge] ClickHouse, VictoriaMetrics
+  - [Edge] Anomaly Detection, Link Health, Remediation (and OPA when used)
+  - [Edge] Grafana, VMAlert, Alertmanager, MailHog
+- Core (Shore/Cloud) — fleet aggregation, centralized auth/UI:
+  - [Core] ClickHouse (fleet), VictoriaMetrics/Mimir
+  - [Core] Fleet Aggregation, Capacity Forecasting, Cross-Ship Benchmarking
+  - [Core] Keycloak (SSO), Onboarding Service, Grafana (fleet), Qdrant
+
+How to run subsets with Docker Compose (examples; service names may vary):
+- Edge-only (minimal):
+  ```
+  docker compose up -d clickhouse victoria-metrics grafana nats vmagent vmalert alertmanager mailhog vector \
+    anomaly-detection link-health remediation
+  ```
+- Core-only (example set):
+  ```
+  docker compose up -d clickhouse grafana keycloak onboarding-service qdrant
+  ```
+
+---
+
+## 1) System Requirements
+
+- OS: macOS, Windows 10/11 with WSL2, Linux (Ubuntu 20.04+)
+- Memory: Minimum 8GB (16GB recommended)
+- CPU: 4+ cores recommended
+- Disk: 20GB free
+
+Tip: If your machine is tight on resources, run a smaller subset (see commands above).
+
+---
+
+## 2) Install Required Software
+
+Choose your OS:
+
+- macOS:
+  - Install Docker Desktop: https://docs.docker.com/desktop/install/mac-install/
+  - Optional: Homebrew for extras (https://brew.sh/)
+- Windows 10/11:
+  - Enable WSL2: https://learn.microsoft.com/windows/wsl/install
+  - Install Docker Desktop (with WSL2 backend): https://docs.docker.com/desktop/install/windows-install/
+- Linux (Ubuntu/Debian):
+  - Option A (quick install)
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y docker.io docker-compose-plugin python3 python3-pip git curl
+    sudo usermod -aG docker $USER
+    newgrp docker
+    docker --version
+    docker compose version
+    python3 --version
+    ```
+  - Option B (if docker-compose-plugin is missing)
+    ```
+    sudo apt update
+    sudo apt install -y ca-certificates curl gnupg
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    echo \
+      "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+      "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt update
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin python3 python3-pip git curl
+    sudo usermod -aG docker $USER
+    newgrp docker
+    ```
+
+No separate binaries are required—Docker will pull everything.
+
+---
+
+## 3) Download the Repository
+
+Pick one:
+
+- Option A: Download ZIP (easiest)
+  - Go to https://github.com/iLodeStar/AIOps-NAAS
+  - Click the green “Code” button > “Download ZIP”
+  - Unzip it and open a terminal in the folder
+- Option B: Git clone (recommended if you know Git)
+  ```bash
+  git clone https://github.com/iLodeStar/AIOps-NAAS.git
+  cd AIOps-NAAS
+  ```
+
+---
+
+## 4) Create Required Accounts and API Keys (Optional but Recommended)
+
+Some features use external APIs (e.g., weather or schedules). You can skip these for a basic local run; the platform will still work with simulated data.
+
+- OpenWeatherMap (for weather context)
+  - Sign up: https://home.openweathermap.org/users/sign_up
+  - Verify email and log in
+  - Get API key: https://home.openweathermap.org/api_keys
+  - Save your API key as WEATHER_API_KEY
+- Scheduling Provider (optional)
+  - Use your organization’s scheduling API (or placeholder)
+  - Obtain an API key/token from your provider
+  - Save it as SCHEDULE_API_KEY
+
+You will put these values in your .env file in the next step.
+
+Security tip: Do not commit real API keys to Git.
+
+---
+
+## 5) Configure the Environment
+
+1) Copy the example environment file and edit
 ```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-plugin python3 python3-pip git curl
-
-# Enable Docker for current user
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Verify installation
-docker --version
-docker compose version
-python3 --version
-```
-
-NOTE: Incase docker-compose-plugin gives "E: Unable to locate package docker-compose-plugin" error follow below:
-```
-# 1. Update existing packages and install prerequisites
-sudo apt update
-sudo apt install ca-certificates curl gnupg
-
-# 2. Add Docker's official GPG key
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-# 3. Add the Docker repository to Apt sources
-echo \
-  "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# 4. Update the package index again
-sudo apt update
-
-# 5. Install the Docker Compose plugin
-sudo apt install docker-compose-plugin
-```
-
-## Configuration
-
-### 1. Environment Variables
-
-Create your environment configuration:
-
-```bash
-# Copy the example environment file
 cp .env.example .env
-
-# Edit with your specific values
-nano .env
+# Open it in a text editor and update values:
+# - Change default passwords
+# - Add WEATHER_API_KEY and SCHEDULE_API_KEY if you have them
 ```
 
-Key environment variables to configure:
-
-```bash
-# Database passwords (change defaults!)
+Key variables commonly used:
+```
 CLICKHOUSE_PASSWORD=your_secure_password
 GRAFANA_PASSWORD=your_admin_password
-
-# External API keys (optional for basic testing)
-WEATHER_API_KEY=your_openweather_api_key
-SCHEDULE_API_KEY=your_scheduling_api_key
-
-# Development settings
+WEATHER_API_KEY=your_openweather_api_key   # optional
+SCHEDULE_API_KEY=your_scheduling_api_key   # optional
 LOG_LEVEL=INFO
 DEBUG_MODE=false
 SIMULATION_MODE=false
 ```
 
-### 2. Vendor Integrations
-
-Configure vendor-specific parameters:
-
+2) Configure vendor integrations (optional, recommended later)
 ```bash
-# Copy the vendor integration template
 cp configs/vendor-integrations.example.yaml configs/vendor-integrations.yaml
-
-# Customize for your environment
-nano configs/vendor-integrations.yaml
+# Open configs/vendor-integrations.yaml and adjust as needed
 ```
+See the Vendor Configuration Guide for details: ../configuration/vendor-config.md
 
-For detailed vendor configuration options, see the [Vendor Configuration Guide](../configuration/vendor-config.md).
-
-### Key Configuration Sections
-
-- **Network Devices**: Configure syslog, SNMP, NetFlow protocols
-- **Satellite RF**: Set up VSAT vendor APIs and SNMP endpoints
-- **Applications**: Define health check endpoints and SLAs  
-- **External Context**: Weather APIs, NMEA navigation, scheduling feeds
-- **Simulation**: Enable realistic data simulation for testing
-
-### 3. Create Required Directories
-
+3) Create local folders for logs/reports
 ```bash
-# Create directories for persistent data and logs
 mkdir -p logs reports data/backup
 ```
 
-## Deployment
+---
 
-### Standard Deployment
+## 6) Start the Platform
 
-Start the complete AIOps platform:
-
+Start everything (recommended for first run):
 ```bash
-# Start all services
 docker compose up -d
-
-# Check service status  
 docker compose ps
-
-# View logs
-docker compose logs -f
+docker compose logs -f  # press Ctrl+C to stop viewing logs
 ```
 
-### Selective Service Deployment
-
-Start only specific services for development:
-
+Health checks:
 ```bash
-# Core data services only
-docker compose up -d clickhouse victoria-metrics grafana nats
+curl http://localhost:8123/ping          # [Edge/Core] ClickHouse
+curl http://localhost:8428/health        # [Edge/Core] VictoriaMetrics
+curl http://localhost:3000/api/health    # [Edge/Core] Grafana
+curl http://localhost:8222/healthz       # [Edge] NATS
 
-# Add monitoring stack
-docker compose up -d vmagent alertmanager mailhog vector
-
-# Add AIOps services
-docker compose up -d anomaly-detection incident-api link-health remediation
+# Application services (may take 1–2 minutes)
+curl http://localhost:8080/health        # [Edge] Anomaly Detection
+curl http://localhost:8081/health        # [Edge] Incident API
+curl http://localhost:8082/health        # [Edge] Link Health
+curl http://localhost:8083/health        # [Edge] Remediation
 ```
 
-### Verification
+Expected resource usage (all services):
+- Memory: 6–8GB
+- CPU: 10–20% on a modern laptop
+- Disk: ~2GB images, ~1GB data initial
 
-Check that services are healthy:
+If you need to run fewer services, see “Selective Service Deployment” below.
 
+---
+
+## 7) Access UIs and Passwords
+
+Web interfaces:
+- [Edge/Core] Grafana: http://localhost:3000 (admin / admin or use GRAFANA_PASSWORD if changed)
+- [Edge/Core] ClickHouse HTTP: http://localhost:8123 (default / CLICKHOUSE_PASSWORD)
+- [Edge] NATS Monitor: http://localhost:8222
+- [Edge/Core] VictoriaMetrics: http://localhost:8428
+- [Edge/Core] VMAlert: http://localhost:8880
+- [Edge/Core] Alertmanager: http://localhost:9093
+- [Edge] MailHog (email testing): http://localhost:8025
+- [Edge/Core] Qdrant: http://localhost:6333
+- [Core] Keycloak Admin Console (if running locally): http://localhost:8089 (admin / admin)
+
+Tip: Keep this page open in a browser and test each URL.
+
+---
+
+## 8) Understand the Services (What They Do)
+
+- [Edge] NATS (Message Bus): the “highway” for streaming telemetry and events between services
+- [Edge/Core] ClickHouse (SQL DB): stores events/logs/records for fast queries and reporting
+- [Edge/Core] VictoriaMetrics (TSDB): stores numeric time-series metrics for alerting and dashboards
+- [Edge/Core] Qdrant (Vector DB): stores embeddings for AI similarity search (optional)
+- [Edge/Core] Grafana (Dashboards): visualizes metrics and data from ClickHouse/VictoriaMetrics
+- [Edge/Core] VMAlert and [Edge/Core] Alertmanager: evaluate alert rules and route notifications
+- [Edge] MailHog: catches emails locally so you can see alert notifications safely
+- [Edge] Vector/Benthos: optional log shipping and stream processing
+- [Edge] AIOps Microservices:
+  - Anomaly Detection: detects unusual patterns from telemetry
+  - Incident API: creates and manages incidents
+  - Link Health: predicts satellite link performance and degradation
+  - Remediation: triggers automated actions to resolve known issues
+- [Core] Advanced analytics:
+  - Fleet Aggregation, Capacity Forecasting, Cross-Ship Benchmarking
+
+Architecture overview and placement details: ../architecture.md
+
+---
+
+## 9) Single Sign-On (Keycloak) Setup and “Keys”
+
+You can run Keycloak locally for SSO/OIDC. To avoid port conflicts with the Anomaly service on 8080, map Keycloak to 8089 on your host.
+
+A) Start Keycloak locally
+- Option 1: Quick dev mode (embedded DB, for local only)
+  ```bash
+  docker run --name keycloak-dev --rm -p 8089:8080 \
+    -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=admin \
+    quay.io/keycloak/keycloak:22.0 start-dev
+  ```
+  Admin Console: http://localhost:8089 (login admin/admin)
+
+- Option 2: With Postgres (persistence)
+  ```bash
+  # Example compose snippet (adapt as needed)
+  version: "3.8"
+  services:
+    postgres:
+      image: postgres:15
+      environment:
+        POSTGRES_DB: keycloak
+        POSTGRES_USER: keycloak
+        POSTGRES_PASSWORD: password
+    keycloak:
+      image: quay.io/keycloak/keycloak:22.0
+      environment:
+        KEYCLOAK_ADMIN: admin
+        KEYCLOAK_ADMIN_PASSWORD: admin
+        KC_DB: postgres
+        KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+        KC_DB_USERNAME: keycloak
+        KC_DB_PASSWORD: password
+      ports:
+        - "8089:8080"
+      command: start-dev
+      depends_on: [postgres]
+  ```
+
+B) Configure Keycloak (Realm, Client, Roles, Users)
+- Create Realm: aiops (Admin Console > Realm settings > Create realm)
+- Create Client for onboarding-service:
+  - Client type: OpenID Connect, Client ID: onboarding-service
+  - Client authentication: ON (confidential), Standard flow: ON, Direct access grants: ON
+  - Root URL: http://localhost:8090, Valid redirect URIs: /auth/callback
+- Get Client Secret (“how to get keys”):
+  - Clients > onboarding-service > Credentials > copy Secret
+  - This is your OIDC_CLIENT_SECRET
+- Realm keys and JWKS (public keys for token validation):
+  - Discovery: http://localhost:8089/realms/aiops/.well-known/openid-configuration
+  - JWKS: http://localhost:8089/realms/aiops/protocol/openid-connect/certs
+- Create roles and test users (recommended):
+  - Roles: aiops-requester, aiops-deployer, aiops-authoriser, aiops-admin, aiops-viewer
+  - Groups named per role; assign users into groups
+
+C) Wire services to Keycloak
+- Add to your .env (or compose env):
+  ```
+  OIDC_ISSUER_URL=http://localhost:8089/realms/aiops
+  OIDC_CLIENT_ID=onboarding-service
+  OIDC_CLIENT_SECRET=your-client-secret-from-keycloak
+  OIDC_REDIRECT_URI=http://localhost:8090/auth/callback
+  SECRET_KEY=your-secure-random-secret-key
+  ```
+- If services talk over Docker network to “keycloak” container, use internal URL for backend calls:
+  - Internal (service-to-service): http://keycloak:8080/realms/aiops
+  - Browser redirects must use host URL http://localhost:8089
+
+D) Test OIDC
 ```bash
-# Service health checks
-curl http://localhost:8123/ping          # ClickHouse
-curl http://localhost:8428/health        # VictoriaMetrics
-curl http://localhost:3000/api/health    # Grafana
-curl http://localhost:8222/healthz       # NATS
-
-# Application services (may take 1-2 minutes to start)
-curl http://localhost:8080/health        # Anomaly Detection
-curl http://localhost:8081/health        # Incident API
-curl http://localhost:8082/health        # Link Health
-curl http://localhost:8083/health        # Remediation
+curl -s http://localhost:8089/realms/aiops/.well-known/openid-configuration | jq .
 ```
+- Open http://localhost:8090 (onboarding service), click Login, authenticate, return to app, validate roles.
 
-### Expected Resource Usage
+Full step-by-step Keycloak guide with screenshots and advanced options: ../onboarding/oidc-keycloak-setup.md
 
-Monitor resource consumption:
+---
 
+## 10) Run the Built-In Tests
+
+These tests generate activity and validate the platform.
+
+From the repository root:
+
+Make scripts executable (Linux/macOS):
 ```bash
-# Check resource usage
-docker stats
-
-# Expected usage with all services:
-# Memory: 6-8GB total
-# CPU: 10-20% on modern systems  
-# Disk: ~2GB for images, ~1GB for data
+chmod +x test_v03_apis.sh test_v04_apis.sh scripts/run_soak_test.sh
 ```
 
-## Service Access
-
-### Web Interfaces
-
-| Service | URL | Default Credentials |
-|---------|-----|-------------------|
-| Grafana | http://localhost:3000 | admin / admin |
-| ClickHouse | http://localhost:8123 | default / (from .env) |
-| NATS Monitor | http://localhost:8222 | - |
-| VictoriaMetrics | http://localhost:8428 | - |
-| VMAlert | http://localhost:8880 | - |
-| Alertmanager | http://localhost:9093 | - |
-| MailHog | http://localhost:8025 | - |
-| Qdrant | http://localhost:6333 | - |
-
-### API Endpoints
-
-| Service | Port | Endpoint | Description |
-|---------|------|----------|-------------|
-| Anomaly Detection | 8080 | `/health`, `/anomalies` | Streaming anomaly detection |
-| Incident API | 8081 | `/health`, `/incidents` | Incident management |
-| Link Health | 8082 | `/health`, `/predict` | Satellite link prediction |
-| Remediation | 8083 | `/health`, `/actions` | Auto-remediation engine |
-| Fleet Aggregation | 8084 | `/health`, `/fleet` | Fleet data aggregation |
-| Capacity Forecasting | 8085 | `/health`, `/forecast` | Capacity prediction |
-| Cross-Ship Benchmarking | 8086 | `/health`, `/benchmark` | Performance benchmarking |
-
-## Testing
-
-### Integration Tests
-
-Run the existing integration tests:
-
+Run integration tests:
 ```bash
 # v0.3 features test
 python3 test_v03_integration.py
 
-# v0.4 features test  
+# v0.4 features test
 python3 test_v04_integration.py
+```
 
-# API functionality tests
+Run API functionality tests:
+```bash
 ./test_v03_apis.sh
 ./test_v04_apis.sh
 ```
 
-### Soak Testing
-
-Run the comprehensive 10-minute soak test:
-
+Soak test (10-minute comprehensive run):
 ```bash
-# Run soak test locally
 bash scripts/run_soak_test.sh
-
-# Run with custom duration and config
+# or custom
 bash scripts/run_soak_test.sh --duration 300 --config configs/vendor-integrations.yaml
 
 # View results
 cat reports/soak-summary.json
 ```
 
-The soak test will:
-- Start the data simulator with anomalies
-- Monitor service health every 30 seconds
-- Consume NATS messages for validation
-- Generate a comprehensive report
+What to expect:
+- Services should report healthy
+- Test scripts will output PASS/FAIL for endpoints
+- Soak test will generate a summary with health checks, message counts, and anomalies
 
-### Manual Testing
+---
 
-Test individual components:
+## 11) Explore the Data Sinks (UI and Queries)
 
+A) [Edge/Core] Grafana (UI-first exploration)
+- Open http://localhost:3000 (admin/admin)
+- Explore dashboards:
+  - System Overview
+  - AIOps Platform (app performance and alerts)
+  - Satellite Link Health (v0.3)
+  - Fleet Management (v0.4)
+- Use “Explore” to query:
+  - Select data source: VictoriaMetrics or ClickHouse (if configured)
+  - Browse available metrics/tables and build queries visually
+
+B) [Edge/Core] VictoriaMetrics (metrics)
+- List metric names:
+  ```bash
+  curl 'http://localhost:8428/api/v1/label/__name__/values' | jq .
+  ```
+- Instant query (replace METRIC_NAME):
+  ```bash
+  curl --get 'http://localhost:8428/api/v1/query' --data-urlencode 'query=METRIC_NAME'
+  ```
+- Range query over last hour:
+  ```bash
+  curl --get 'http://localhost:8428/api/v1/query_range' \
+    --data-urlencode 'query=METRIC_NAME' \
+    --data-urlencode 'start='$(date -u -d '-1 hour' +%s) \
+    --data-urlencode 'end='$(date -u +%s) \
+    --data-urlencode 'step=30'
+  ```
+
+C) [Edge/Core] ClickHouse (events/logs via SQL)
+- Quick peek via HTTP:
+  ```bash
+  curl 'http://localhost:8123/?query=SHOW%20DATABASES'
+  curl 'http://localhost:8123/?query=SHOW%20TABLES'
+  ```
+- Interactive client:
+  ```bash
+  docker compose exec clickhouse clickhouse-client -u default --password $CLICKHOUSE_PASSWORD
+
+  -- inside the shell:
+  SHOW DATABASES;
+  USE default;
+  SHOW TABLES;
+
+  -- discover likely tables
+  SELECT database, name FROM system.tables
+  WHERE database NOT IN ('system')
+    AND (name ILIKE '%event%' OR name ILIKE '%log%' OR name ILIKE '%anomal%' OR name ILIKE '%incident%' OR name ILIKE '%telemetry%')
+  ORDER BY database, name;
+
+  -- sample rows
+  DESCRIBE TABLE my_table;
+  SELECT * FROM my_table LIMIT 10;
+  ```
+
+D) [Edge] NATS (message bus)
+- Monitor:
+  ```bash
+  curl http://localhost:8222/varz | jq .
+  curl http://localhost:8222/connz | jq .
+  curl http://localhost:8222/subsz?subs=1 | jq .
+  ```
+- Consume:
+  ```bash
+  python3 tools/data-simulator/consumer.py --subjects "telemetry.*" --duration 60
+  ```
+
+E) [Edge/Core] Qdrant (vector DB)
+- List collections:
+  ```bash
+  curl http://localhost:6333/collections | jq .
+  ```
+
+F) [Edge] MailHog (email testing)
+- Open http://localhost:8025 to see captured emails from Alertmanager.
+
+Tip: Use Grafana Explore, ClickHouse “SHOW TABLES”, and VictoriaMetrics label values to discover what data exists.
+
+---
+
+## 12) Selective Service Deployment (Resource-Saving)
+
+Only core data services:
 ```bash
-# Test data simulator
-python3 tools/data-simulator/data_simulator.py --duration 30 --anomalies
-
-# Test NATS consumer
-python3 tools/data-simulator/consumer.py --subjects "telemetry.*" --duration 60
-
-# Test vendor configuration
-python3 -c "import yaml; yaml.safe_load(open('configs/vendor-integrations.yaml'))"
+docker compose up -d clickhouse victoria-metrics grafana nats
 ```
 
-## Monitoring and Observability
-
-### Grafana Dashboards
-
-Access pre-configured dashboards at http://localhost:3000:
-
-- **System Overview**: Infrastructure metrics and health
-- **AIOps Platform**: Application performance and alerts
-- **Satellite Link Health**: v0.3 predictive monitoring
-- **Fleet Management**: v0.4 multi-ship visualization
-
-### Log Monitoring
-
-View service logs:
-
+Add monitoring stack:
 ```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f link-health
-
-# Application logs only
-docker compose logs -f anomaly-detection incident-api link-health remediation
-
-# Search logs
-docker compose logs | grep "ERROR\|WARN"
+docker compose up -d vmagent alertmanager vmalert mailhog vector
 ```
 
-### NATS Message Monitoring
-
-Monitor message bus activity:
-
+Add AIOps services:
 ```bash
-# NATS server info
-curl http://localhost:8222/connz
-
-# Consumer activity
-python3 tools/data-simulator/consumer.py --subjects "telemetry.*" "link.health.*"
+docker compose up -d anomaly-detection incident-api link-health remediation
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-**Services fail to start**
-
+Stop optional services to save memory:
 ```bash
-# Check Docker status
-systemctl status docker
-
-# Check available resources
-free -h
-df -h
-
-# Check for port conflicts
-netstat -tulpn | grep -E ':(3000|8123|8428|4222)'
-```
-
-**Service health check failures**
-
-```bash
-# Check service logs
-docker compose logs service-name
-
-# Restart unhealthy service
-docker compose restart service-name
-
-# Check network connectivity
-docker compose exec service-name ping clickhouse
-```
-
-**Configuration errors**
-
-```bash
-# Validate YAML files
-python3 -c "import yaml; yaml.safe_load(open('configs/vendor-integrations.yaml'))"
-
-# Check environment variables
-docker compose config
-```
-
-**Memory or performance issues**
-
-```bash
-# Check resource usage
-docker stats
-
-# Reduce resource usage by disabling optional services
-docker compose stop ollama qdrant  # Disable LLM components
-docker compose stop benthos        # Disable stream processing
-```
-
-### Log Locations
-
-Container logs are available via Docker:
-
-```bash
-docker compose logs [service-name]
-```
-
-Persistent data volumes:
-- **ClickHouse data**: `clickhouse_data` volume
-- **Grafana dashboards**: `grafana_data` volume  
-- **VictoriaMetrics data**: `vm_data` volume
-- **NATS data**: `nats_data` volume
-
-### Performance Optimization
-
-**Memory optimization:**
-
-```bash
-# Stop resource-intensive services if not needed
 docker compose stop ollama qdrant benthos
-
-# Reduce ClickHouse memory usage
-# Edit docker-compose.yml to add memory limits
 ```
 
-**Disk space optimization:**
+---
 
-```bash
-# Clean up Docker resources
-docker system prune -f
+## 13) Monitoring and Logs
 
-# Remove old data
-docker volume prune
-```
+- Tail logs for all services:
+  ```bash
+  docker compose logs -f
+  ```
+- Tail for specific service:
+  ```bash
+  docker compose logs -f link-health
+  ```
+- Search errors:
+  ```bash
+  docker compose logs | grep -E "ERROR|WARN"
+  ```
 
-## Development Workflow
+---
 
-### Code Changes
+## 14) Development Workflow (Optional)
 
-When developing new features:
+- Rebuild a service after code changes:
+  ```bash
+  docker compose build service-name
+  docker compose up -d service-name
+  docker compose logs -f service-name
+  ```
+- Run quick tests:
+  ```bash
+  python3 test_v03_integration.py
+  bash scripts/run_soak_test.sh --duration 120
+  python3 tools/data-simulator/data_simulator.py --duration 30 --anomalies
+  ```
 
-```bash
-# Make code changes
-# ...
+---
 
-# Rebuild specific service
-docker compose build service-name
+## 15) Troubleshooting
 
-# Restart service with new code
-docker compose up -d service-name
+Common issues and fixes:
 
-# View updated logs
-docker compose logs -f service-name
-```
+- Services fail to start
+  ```bash
+  systemctl status docker          # Linux
+  free -h                          # memory check
+  df -h                            # disk space
+  # Check for port conflicts (Linux/macOS)
+  netstat -tulpn | grep -E ':(3000|8123|8428|4222|8025|8222|9093|8880|6333|8089)'
+  ```
+- Health check failures
+  ```bash
+  docker compose logs service-name
+  docker compose restart service-name
+  docker compose exec service-name ping clickhouse
+  ```
+- Config errors
+  ```bash
+  python3 -c "import yaml; yaml.safe_load(open('configs/vendor-integrations.yaml'))"
+  docker compose config
+  ```
+- OIDC issues
+  - Invalid client credentials: verify OIDC_CLIENT_SECRET
+  - Invalid redirect URI: must exactly match /auth/callback
+  - No roles found: ensure roles/groups and client scopes are configured
+  - Issuer mismatch: OIDC_ISSUER_URL must be the exact realm URL (includes /realms/aiops)
+- Windows tips
+  - Ensure Docker Desktop uses WSL2 backend
+  - Allocate enough resources (Settings > Resources)
+- Proxy/corporate networks
+  - Configure Docker proxy in settings or systemd drop-ins (Linux)
+- Memory/performance
+  ```bash
+  docker stats
+  docker compose stop ollama qdrant benthos   # optional components
+  ```
 
-### Testing Changes
+---
 
-```bash
-# Run integration tests
-python3 test_v03_integration.py
+## 16) Cleanup and Reset
 
-# Run soak test
-bash scripts/run_soak_test.sh --duration 120
+- Stop everything:
+  ```bash
+  docker compose down
+  ```
+- Remove volumes (deletes data):
+  ```bash
+  docker compose down -v
+  ```
+- Remove images:
+  ```bash
+  docker compose down --rmi all
+  ```
+- Full reset:
+  ```bash
+  docker compose down -v --rmi all
+  docker system prune -af
+  rm -f .env configs/vendor-integrations.yaml
+  cp .env.example .env
+  cp configs/vendor-integrations.example.yaml configs/vendor-integrations.yaml
+  ```
 
-# Test specific components
-python3 tools/data-simulator/data_simulator.py --duration 30
-```
+---
 
-## Cleanup
+## 17) Next Steps
 
-### Stop Services
+- Architecture deep dive and Edge/Core patterns: ../architecture.md
+- Keycloak OIDC setup (roles, scopes, client secret, JWKS): ../onboarding/oidc-keycloak-setup.md
+- Onboarding Service usage (UI/API): ../onboarding/guide.md
+- Production deployment hardening: ./production.md
+- Vendor configuration: ../configuration/vendor-config.md
+- Full Test Plan: ../testing/test-plan.md
 
-```bash
-# Stop all services
-docker compose down
+---
 
-# Remove volumes (WARNING: deletes data)
-docker compose down -v
+## Appendix: Reference Commands
 
-# Remove images
-docker compose down --rmi all
-```
+- Verify services
+  ```bash
+  docker compose ps
+  curl http://localhost:3000/api/health
+  curl http://localhost:8428/health
+  ```
+- Discover VictoriaMetrics metrics
+  ```bash
+  curl 'http://localhost:8428/api/v1/label/__name__/values' | jq .
+  ```
+- Discover ClickHouse tables
+  ```bash
+  docker compose exec clickhouse clickhouse-client -u default --password $CLICKHOUSE_PASSWORD -q "SHOW DATABASES"
+  docker compose exec clickhouse clickhouse-client -u default --password $CLICKHOUSE_PASSWORD -q "SHOW TABLES FROM default"
+  ```
+- Monitor NATS
+  ```bash
+  curl http://localhost:8222/varz | jq .
+  curl http://localhost:8222/connz | jq .
+  curl http://localhost:8222/subsz?subs=1 | jq .
+  ```
 
-### Reset Environment
-
-Complete environment reset:
-
-```bash
-# Stop everything and remove data
-docker compose down -v --rmi all
-
-# Clean system
-docker system prune -af
-
-# Remove configuration
-rm .env configs/vendor-integrations.yaml
-
-# Reset to defaults
-cp .env.example .env
-cp configs/vendor-integrations.example.yaml configs/vendor-integrations.yaml
-```
-
-## Next Steps
-
-After successful deployment:
-
-1. **Configure Vendors**: Follow the [Vendor Configuration Guide](../configuration/vendor-config.md)
-2. **Set up Monitoring**: Configure alerts and dashboards  
-3. **Run Tests**: Execute the full [Test Plan](../testing/test-plan.md)
-4. **Plan Production**: Review production deployment requirements
-
-For production deployment, see the production deployment guide (coming in v1.0).
+Security note: This guide is for local and non-production use. Always rotate default credentials, use TLS, and restrict network access for production environments.
