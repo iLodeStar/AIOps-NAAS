@@ -43,7 +43,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest-cov flake8 black isort httpx
           # Install additional dependencies that may be needed
-          pip install psycopg2-binary sqlite3 || true
+          pip install psycopg2-binary || true
       
       - name: Lint with flake8
         working-directory: ${{ env.SERVICE_PATH }}
