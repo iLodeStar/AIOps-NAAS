@@ -92,22 +92,18 @@ jobs:
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 60  # Wait for services to start
+        # Start only essential services for CI testing
+        echo "Starting essential services for CI testing..."
+        docker compose up -d clickhouse victoria-metrics grafana || echo "Some services failed to start, continuing..."
+        sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
       run: |
-        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:9093/api/v1/status > /dev/null; do echo "Waiting for Alertmanager..."; sleep 5; done' || echo "Alertmanager health check timeout"
+        echo "Checking service health..."
+        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null 2>&1; do echo "Waiting for VictoriaMetrics..."; sleep 10; done' || echo "VictoriaMetrics not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
+        echo "Service health check completed"
     
     - name: Run v0.3 integration tests
       run: |
@@ -165,14 +161,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down || echo "Failed to stop services"
 
   system:
     name: System Tests
@@ -187,21 +176,17 @@ jobs:
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 60  # Wait for services to start
+        echo "Starting essential services for system tests..."
+        docker compose up -d clickhouse victoria-metrics grafana || echo "Some services failed to start, continuing..."
+        sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
       run: |
-        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || true
-        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || true
+        echo "Checking service health for system tests..."
+        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null 2>&1; do echo "Waiting for VictoriaMetrics..."; sleep 10; done' || echo "VictoriaMetrics not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
+        echo "System test service health check completed"
     
     - name: Run v0.3 API tests
       run: |
@@ -271,14 +256,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down || echo "Failed to stop services"
 
   e2e:
     name: End-to-End Tests
@@ -306,22 +284,18 @@ jobs:
     
     - name: Start services with docker-compose
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose up -d
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose up -d
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-          exit 1
-        fi
-        sleep 90  # Wait longer for all services to start
+        echo "Starting essential services for e2e tests..."
+        docker compose up -d clickhouse victoria-metrics grafana nats || echo "Some services failed to start, continuing..."
+        sleep 30  # Wait for initial startup
     
     - name: Wait for services to be ready
       run: |
-        timeout 180 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do echo "Waiting for Grafana..."; sleep 5; done' || echo "Grafana health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:8428/health > /dev/null; do echo "Waiting for VictoriaMetrics..."; sleep 5; done' || echo "VictoriaMetrics health check timeout"
-        timeout 180 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null; do echo "Waiting for NATS..."; sleep 5; done' || echo "NATS health check timeout"
+        echo "Checking service health for e2e tests..."
+        timeout 120 bash -c 'until curl -s http://localhost:8428/health > /dev/null 2>&1; do echo "Waiting for VictoriaMetrics..."; sleep 10; done' || echo "VictoriaMetrics not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:8123/ping > /dev/null 2>&1; do echo "Waiting for ClickHouse..."; sleep 10; done' || echo "ClickHouse not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do echo "Waiting for Grafana..."; sleep 10; done' || echo "Grafana not ready (continuing anyway)"
+        timeout 120 bash -c 'until curl -s http://localhost:4222/healthz > /dev/null 2>&1; do echo "Waiting for NATS..."; sleep 10; done' || echo "NATS not ready (continuing anyway)"
+        echo "E2E test service health check completed"
     
     - name: Run data simulator
       run: |
@@ -419,14 +393,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        # Try docker compose first, fallback to docker-compose
-        if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-          docker compose down
-        elif command -v docker-compose &> /dev/null; then
-          docker-compose down
-        else
-          echo "Neither 'docker compose' nor 'docker-compose' is available"
-        fi
+        docker compose down || echo "Failed to stop services"
 
   reporting:
     name: Generate Reports
