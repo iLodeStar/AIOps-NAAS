@@ -1,0 +1,190 @@
+# Vendor-Specific Integration Configuration
+# Copy this file to configs/vendor-integrations.yaml and customize for your environment
+
+# Network Device Configuration
+network_devices:
+  protocols:
+    syslog:
+      enabled: true
+      port: 514
+      format: "rfc3164"  # rfc3164, rfc5424
+    snmp:
+      enabled: true
+      port: 161
+      version: "2c"  # v1, v2c, v3
+      community: "public"  # Override with environment variable
+      timeout: 10
+      retries: 3
+    netflow:
+      enabled: true
+      port: 2055
+      version: 9  # 5, 9, 10 (IPFIX)
+    sflow:
+      enabled: false
+      port: 6343
+    ipfix:
+      enabled: false
+      port: 4739
+  polling:
+    interval_seconds: 30
+    batch_size: 100
+    concurrent_workers: 4
+
+# Satellite RF Equipment Configuration
+satellite_rf:
+  vendors:
+    - name: "vsat_vendor_1"
+      model: "VSAT-2000"
+      api_endpoint: "${VSAT1_API_ENDPOINT:-http://localhost:8090}"
+      authentication:
+        type: "basic"  # basic, token, cert
+        username: "${VSAT1_USERNAME}"
+        password: "${VSAT1_PASSWORD}"
+      polling:
+        interval_seconds: 15
+        timeout_seconds: 10
+        rate_limit_rps: 2
+      kpi_mapping:
+        snr_db: "signal.snr"
+        es_no_db: "signal.es_no" 
+        ber: "quality.bit_error_rate"
+        signal_strength_dbm: "signal.strength"
+        rain_fade_margin_db: "signal.rain_fade_margin"
+        frequency_offset_hz: "signal.frequency_offset"
+        elevation_angle_deg: "antenna.elevation"
+        azimuth_angle_deg: "antenna.azimuth"
+    - name: "vsat_vendor_2"
+      model: "SAT-Link-Pro"
+      api_endpoint: "${VSAT2_API_ENDPOINT:-http://localhost:8091}"
+      snmp_config:
+        host: "${VSAT2_SNMP_HOST:-192.168.1.100}"
+        port: 161
+        community: "${VSAT2_SNMP_COMMUNITY:-public}"
+        mibs:
+          - "SAT-LINK-MIB"
+          - "VSAT-PERFORMANCE-MIB"
+      kpi_mapping:
+        snr_db: "1.3.6.1.4.1.12345.1.1.1"  # SNMP OID
+        ber: "1.3.6.1.4.1.12345.1.1.2"
+        signal_strength_dbm: "1.3.6.1.4.1.12345.1.1.3"
+      thresholds:
+        snr_warning: 12.0
+        snr_critical: 8.0
+        ber_warning: 1e-5
+        ber_critical: 1e-3
+
+# Application Performance Monitoring
+applications:
+  probes:
+    - name: "web_services"
+      endpoints:
+        - url: "${APP1_URL:-http://localhost:8080/health}"
+          method: "GET"
+          timeout_seconds: 5
+          expected_status: 200
+        - url: "${APP2_URL:-http://localhost:8081/health}" 
+          method: "GET"
+          timeout_seconds: 5
+          expected_status: 200
+      sla:
+        response_time_ms: 1000
+        availability_percent: 99.9
+        error_rate_percent: 0.1
+    - name: "database_services"
+      endpoints:
+        - url: "${DB_HEALTH_URL:-http://localhost:5432/health}"
+          timeout_seconds: 10
+      sla:
+        response_time_ms: 500
+        availability_percent: 99.99
+  exporters:
+    prometheus:
+      enabled: true
+      port: 9090
+      scrape_interval: "15s"
+    jaeger:
+      enabled: false
+      endpoint: "${JAEGER_ENDPOINT:-http://localhost:14268}"
+
+# External Context Data Sources
+external_context:
+  weather:
+    provider: "openweather"
+    api_base_url: "${WEATHER_API_URL:-https://api.openweathermap.org/data/2.5}"
+    api_key: "${WEATHER_API_KEY}"  # Required - set in environment
+    update_interval_minutes: 30
+    parameters:
+      - "temperature"
+      - "humidity"
+      - "precipitation"
+      - "wind_speed"
+      - "wind_direction"
+      - "visibility"
+  ship_navigation:
+    nmea:
+      enabled: true
+      sources:
+        - type: "serial"
+          device: "/dev/ttyUSB0"
+          baud_rate: 4800
+        - type: "tcp"
+          host: "${NMEA_TCP_HOST:-192.168.1.200}"
+          port: 2000
+    ais:
+      enabled: false
+      receiver_ip: "${AIS_RECEIVER_IP}"
+      receiver_port: 4001
+  scheduling:
+    feed_sources:
+      - name: "port_schedules"
+        url: "${SCHEDULE_FEED_URL}"
+        format: "json"  # json, xml, csv
+        update_interval_hours: 6
+        authentication:
+          type: "api_key"
+          header: "X-API-Key"
+          value: "${SCHEDULE_API_KEY}"
+
+# Data Simulation Configuration (for testing)
+simulation:
+  enabled: false  # Set to true for development/testing
+  base_distributions:
+    modem:
+      snr_db:
+        mean: 15.0
+        std_dev: 3.0
+        min_value: 5.0
+        max_value: 25.0
+      ber:
+        base: 1e-6
+        variation_factor: 10.0
+      signal_strength_dbm:
+        mean: -75.0
+        std_dev: 5.0
+    weather:
+      precipitation_mm_hr:
+        mean: 0.5
+        std_dev: 2.0
+        max_value: 50.0
+      wind_speed_knots:
+        mean: 15.0
+        std_dev: 8.0
+        max_value: 60.0
+  anomalies:
+    probability: 0.1  # 10% chance of anomaly per measurement
+    types:
+      - "rain_fade"
+      - "equipment_degradation"
+      - "interference"
+      - "weather_storm"
+    severity_distribution:
+      low: 0.6
+      medium: 0.3
+      high: 0.1
+  publishing:
+    interval_seconds: 5
+    jitter_percent: 20
+    subjects:
+      - "telemetry.modem.kpis"
+      - "telemetry.weather.current"
+      - "telemetry.ship.navigation"

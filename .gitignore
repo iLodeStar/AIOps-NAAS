@@ -40,6 +40,10 @@ __pycache__/
 venv/
 .env
 .env.*
+
+# Allow example env file to be tracked (even with .env.* ignored)
+!.env.example
+
 .pytest_cache/
 .mypy_cache/
 .hypothesis/
