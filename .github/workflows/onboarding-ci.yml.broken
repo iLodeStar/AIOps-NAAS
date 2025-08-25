@@ -1,16 +1,15 @@
----
 name: Onboarding Service CI
 
-'on':
+on:
   push:
-    branches: [main, develop]
+    branches: [ main, develop ]
     paths:
       - 'services/onboarding-service/**'
       - 'opa/policies/onboarding.rego'
       - 'opa/policies/service-actions.rego'
       - '.github/workflows/onboarding-ci.yml'
   pull_request:
-    branches: [main]
+    branches: [ main ]
     paths:
       - 'services/onboarding-service/**'
       - 'opa/policies/onboarding.rego'
