@@ -367,13 +367,14 @@ class AIOpsDataSimulator:
             data.active_connections = 0
             data.queue_depth = random.randint(100, 1000)
     
-    async def run_simulation(self, duration_minutes: int = 10, interval_seconds: int = 5):
+    async def run_simulation(self, duration_minutes: int = 10, interval_seconds: int = 5, output_format: str = "jsonl"):
         """
         Run the complete data simulation
         
         Args:
             duration_minutes: How long to run the simulation
             interval_seconds: Interval between data generations
+            output_format: Output format (jsonl, csv, or both)
         """
         end_time = datetime.now() + timedelta(minutes=duration_minutes)
         
@@ -383,11 +384,16 @@ class AIOpsDataSimulator:
         logger.info(f"Anomaly rate: {self.anomaly_rate:.1%}")
         logger.info(f"Ship: {self.ship_config['name']} ({self.ship_config['imo']})")
         
-        # Create output files
-        with open("simulation_data.jsonl", "w") as json_file, \
-             open("simulation_data.csv", "w", newline="") as csv_file:
-            
-            csv_writer = None
+        # Create output files based on format choice
+        json_file = None
+        csv_file = None
+        csv_writer = None
+        
+        try:
+            if output_format in ["jsonl", "both"]:
+                json_file = open("simulation_data.jsonl", "w")
+            if output_format in ["csv", "both"]:
+                csv_file = open("simulation_data.csv", "w", newline="")
             
             while datetime.now() < end_time:
                 self.iteration_count += 1
@@ -411,18 +417,20 @@ class AIOpsDataSimulator:
                 }
                 
                 # Write to JSON Lines file
-                json_file.write(json.dumps(data_point) + "\n")
-                json_file.flush()
+                if json_file:
+                    json_file.write(json.dumps(data_point) + "\n")
+                    json_file.flush()
                 
                 # Write to CSV (flattened)
-                if csv_writer is None:
+                if csv_file:
+                    if csv_writer is None:
+                        flattened = self._flatten_data_point(data_point)
+                        csv_writer = csv.DictWriter(csv_file, fieldnames=flattened.keys())
+                        csv_writer.writeheader()
+                    
                     flattened = self._flatten_data_point(data_point)
-                    csv_writer = csv.DictWriter(csv_file, fieldnames=flattened.keys())
-                    csv_writer.writeheader()
-                
-                flattened = self._flatten_data_point(data_point)
-                csv_writer.writerow(flattened)
-                csv_file.flush()
+                    csv_writer.writerow(flattened)
+                    csv_file.flush()
                 
                 # Log progress
                 if self.iteration_count % 10 == 0:
@@ -431,6 +439,13 @@ class AIOpsDataSimulator:
                 
                 # Wait for next iteration
                 await asyncio.sleep(interval_seconds)
+        
+        finally:
+            # Clean up file handles
+            if json_file:
+                json_file.close()
+            if csv_file:
+                csv_file.close()
         
         # Final statistics
         duration = datetime.now() - self.start_time
@@ -482,6 +497,9 @@ def main():
                        help="Data generation interval in seconds (default: 5)")
     parser.add_argument("--anomaly-rate", type=float, default=0.15,
                        help="Anomaly injection rate 0.0-1.0 (default: 0.15)")
+    parser.add_argument("--output-format", type=str, default="jsonl", 
+                       choices=["jsonl", "csv", "both"],
+                       help="Output format (default: jsonl)")
     
     args = parser.parse_args()
     
@@ -496,7 +514,8 @@ def main():
     try:
         results = asyncio.run(simulator.run_simulation(
             duration_minutes=args.duration,
-            interval_seconds=args.interval
+            interval_seconds=args.interval,
+            output_format=args.output_format
         ))
         
         print("\n" + "="*50)
@@ -506,7 +525,14 @@ def main():
         print(f"Anomalies injected: {results['anomalies']}")
         print(f"Anomaly rate: {results['anomaly_rate']:.1%}")
         print(f"Duration: {results['duration_seconds']:.1f} seconds")
-        print(f"Output files: simulation_data.jsonl, simulation_data.csv")
+        
+        # List output files based on format
+        output_files = []
+        if args.output_format in ["jsonl", "both"]:
+            output_files.append("simulation_data.jsonl")
+        if args.output_format in ["csv", "both"]:
+            output_files.append("simulation_data.csv")
+        print(f"Output files: {', '.join(output_files)}")
         
         return 0
         

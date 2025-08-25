@@ -675,6 +675,11 @@ jobs:
           
         } > test_report_non_technical.md
     
+    - name: Install HTML conversion dependencies
+      run: |
+        echo "📦 Installing HTML conversion dependencies..."
+        pip install markdown
+    
     - name: Convert reports to HTML
       run: |
         echo "🌐 Converting reports to HTML..."
