@@ -73,17 +73,14 @@ Get started quickly with the complete local development environment:
 
 ### Quick Enable/Disable Optional Components
 
-The platform includes several optional services for enhanced functionality. Control them via `.env` file:
+The platform includes several optional services for enhanced functionality. These services are defined in `docker-compose.yml` but can be started independently:
 
-```bash
-# Copy environment template and edit toggles
-cp .env.example .env
-```
+**Optional Services:**
+- **Qdrant** - Vector database for RAG/LLM functionality  
+- **Benthos** - Stream correlation and incident pipeline
+- **Ollama** - Local LLM inference engine
 
-**Optional Service Toggles:**
-- `ENABLE_QDRANT=true|false` - Vector database for RAG/LLM functionality  
-- `ENABLE_BENTHOS=true|false` - Stream correlation and incident pipeline
-- `ENABLE_OLLAMA=true|false` - Local LLM inference engine
+**Note**: The `.env` file toggles (`ENABLE_QDRANT`, `ENABLE_BENTHOS`, `ENABLE_OLLAMA`) are for application logic, not Docker Compose. Use the commands below to control which services run.
 
 ### Start/Stop Individual Services
 
