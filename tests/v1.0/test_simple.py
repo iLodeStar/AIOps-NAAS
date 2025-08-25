@@ -5,6 +5,7 @@ Simple test runner for v1.0 components
 import sys
 import os
 import asyncio
+import pytest
 
 # Add src to path and create module alias
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../src'))
@@ -136,6 +137,7 @@ def test_drift_detector():
         print(f"✗ Drift Detector test failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_integration():
     """Test basic integration"""
     print("Testing Integration...")
