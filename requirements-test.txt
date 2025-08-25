@@ -5,6 +5,7 @@ pytest-asyncio>=0.21.0
 
 # Core application dependencies  
 requests>=2.31.0
+httpx>=0.26.0
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.4.0
@@ -30,3 +31,5 @@ jinja2>=3.1.0
 # Development and CI dependencies
 coverage>=7.0.0
 aiofiles>=23.0.0
+asyncio-mqtt>=0.16.0
+paho-mqtt>=1.6.0

@@ -81,8 +81,9 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install pytest pytest-asyncio requests fastapi uvicorn nats-py httpx faker
-        # Install requirements from services if they exist
+        # Install core test dependencies first
+        pip install pytest pytest-cov pytest-asyncio
+        # Install all dependencies from requirements-test.txt
         if [ -f "requirements-test.txt" ]; then
           pip install -r requirements-test.txt
         fi
@@ -207,7 +208,7 @@ jobs:
         curl -s http://localhost:3000/api/health || echo "Grafana: DOWN" >> service_health.log
         curl -s http://localhost:8428/health || echo "VictoriaMetrics: DOWN" >> service_health.log
         curl -s http://localhost:9093/api/v1/status || echo "Alertmanager: DOWN" >> service_health.log
-        curl -s http://localhost:8080/health || echo "ClickHouse: DOWN" >> service_health.log
+        curl -s http://localhost:8123/ping || echo "ClickHouse: DOWN" >> service_health.log
         curl -s http://localhost:4222/healthz || echo "NATS: DOWN" >> service_health.log
     
     - name: Generate JUnit results for system tests
@@ -273,8 +274,9 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install requests fastapi uvicorn nats-py asyncio-mqtt faker httpx
-        # Install requirements from root if they exist
+        # Install core dependencies first
+        pip install pytest pytest-asyncio
+        # Install all dependencies from requirements-test.txt
         if [ -f "requirements-test.txt" ]; then
           pip install -r requirements-test.txt
         fi
