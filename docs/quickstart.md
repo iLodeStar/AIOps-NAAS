@@ -92,13 +92,19 @@ LIMIT 10;
    ```
 3. You should see CPU metrics being scraped from node-exporter
 
-### 4. Install and Test Ollama Model
+### 4. OLLAMA LLM Model (Automatically Configured)
 
-**Note**: Do not auto-pull large models. Follow these steps:
+**Note**: The OLLAMA service now automatically pulls the default model (mistral) on startup.
 
-1. Install a lightweight model:
+**Automatic Setup**: When you start the full stack with `bash scripts/aiops.sh up --all`, the system will:
+1. Start the OLLAMA service
+2. Automatically pull the mistral model (if not already present)
+3. Verify the model is working correctly
+
+**Manual Verification**:
+1. Check that the model is available:
 ```bash
-docker compose exec ollama ollama pull mistral
+docker compose exec ollama ollama list
 ```
 
 2. Test the model:
@@ -111,6 +117,13 @@ curl http://localhost:11434/api/generate -d '{
 ```
 
 3. You should get a JSON response with the model's explanation
+
+**Configuration Options**:
+- **Default model**: Set `OLLAMA_DEFAULT_MODEL=mistral` in `.env` (or use a different model)
+- **Auto-pull control**: Set `OLLAMA_AUTO_PULL=false` in `.env` to disable automatic model pulling
+- **Command-line override**: Use `bash scripts/aiops.sh up --all --ollama-model llama2` to specify a different model
+
+**Available Models**: See [Ollama Model Library](https://ollama.com/library) for other models like `llama2`, `codellama`, `phi`, etc.
 
 ### 5. Test Email Alerts with MailHog
 

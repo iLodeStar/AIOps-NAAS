@@ -106,7 +106,8 @@ docker compose ps qdrant ollama benthos
 
 **🤖 Ollama (LLM Runtime)**
 - API: [http://localhost:11434](http://localhost:11434)
-- **Recommended starter model**: `docker compose exec ollama ollama pull mistral`
+- **Default model**: `mistral` (automatically pulled on startup)
+- **Configure different model**: Set `OLLAMA_DEFAULT_MODEL` in `.env` or use `--ollama-model` flag
 - Test API: `curl http://localhost:11434/api/generate -d '{"model":"mistral","prompt":"Explain AIOps:","stream":false}'`
 - Model library: [https://ollama.com/library](https://ollama.com/library)
 
@@ -136,8 +137,8 @@ docker compose up -d incident-api benthos
 **4. AI/ML Stack:**
 ```bash
 docker compose up -d qdrant ollama
-# Then install recommended model:
-docker compose exec ollama ollama pull mistral
+# Model is automatically pulled - no manual setup needed!
+# Default: mistral (configurable via OLLAMA_DEFAULT_MODEL in .env)
 ```
 
 ### Quick Start v0.3/v0.4
