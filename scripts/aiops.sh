@@ -80,7 +80,8 @@ ask_yes_no() {
 ask_input() {
   local prompt="$1" def="${2:-}" secret="${3:-false}" reply
   if [[ "$secret" == "true" ]]; then
-    read -r -s -p "$prompt [$def]: " reply || reply=""; echo
+    read -r -s -p "$prompt [$def]: " reply || reply=""
+    echo >&2  # Print newline to stderr for formatting, not captured in output
   else
     read -r -p "$prompt [$def]: " reply || reply=""
   fi
@@ -89,11 +90,22 @@ ask_input() {
 
 set_env_kv() {
   local key="$1" value="$2" file="$ROOT_DIR/.env"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file"
+  
+  # Create a temporary file for safe key-value updates
+  local temp_file="${file}.tmp"
+  
+  if [[ -f "$file" ]]; then
+    # Remove existing key and write to temp file
+    grep -v "^${key}=" "$file" > "$temp_file" 2>/dev/null || true
   else
-    echo "${key}=${value}" >> "$file"
+    touch "$temp_file"
   fi
+  
+  # Append the new key=value pair
+  echo "${key}=${value}" >> "$temp_file"
+  
+  # Replace original file atomically
+  mv "$temp_file" "$file"
 }
 
 ensure_env() {
