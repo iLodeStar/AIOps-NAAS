@@ -569,6 +569,28 @@ Common issues and fixes:
   docker stats
   docker compose stop ollama qdrant benthos   # optional components
   ```
+- **Troubleshooting: Node Exporter mount propagation**
+  - On WSL2, Docker Desktop with private root mounts, node-exporter may fail with:
+    ```
+    Error: path / is mounted on / but it is not a shared or slave mount
+    ```
+  - **Solution**: The repository includes `docker-compose.override.yml` with mount fixes:
+    ```yaml
+    services:
+      node-exporter:
+        volumes:
+          - '/:/host:ro,rprivate'  # Use rprivate instead of rslave
+        command:
+          - '--path.rootfs=/host'
+          - '--path.procfs=/host/proc'
+          - '--path.sysfs=/host/sys'
+          # ... additional collectors config
+    ```
+  - **Alternative**: If node-exporter still fails, use metric simulation:
+    ```bash
+    ./scripts/simulate_node_metrics.sh --duration 600
+    ```
+  - This provides the node_* metrics needed by the anomaly detection service.
 
 ---
 
