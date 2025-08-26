@@ -80,7 +80,9 @@ ask_yes_no() {
 ask_input() {
   local prompt="$1" def="${2:-}" secret="${3:-false}" reply
   if [[ "$secret" == "true" ]]; then
-    read -r -s -p "$prompt [$def]: " reply || reply=""; echo
+    read -r -s -p "$prompt [$def]: " reply || reply=""
+    # Write newline to stderr to properly separate prompts
+    echo >&2
   else
     read -r -p "$prompt [$def]: " reply || reply=""
   fi
@@ -89,8 +91,12 @@ ask_input() {
 
 set_env_kv() {
   local key="$1" value="$2" file="$ROOT_DIR/.env"
+  
   if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file"
+    # Use grep -v to remove the line, then append the new one
+    # This avoids sed delimiter issues entirely
+    grep -v "^${key}=" "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+    echo "${key}=${value}" >> "$file"
   else
     echo "${key}=${value}" >> "$file"
   fi
