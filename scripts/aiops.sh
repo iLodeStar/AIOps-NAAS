@@ -80,7 +80,9 @@ ask_yes_no() {
 ask_input() {
   local prompt="$1" def="${2:-}" secret="${3:-false}" reply
   if [[ "$secret" == "true" ]]; then
-    read -r -s -p "$prompt [$def]: " reply || reply=""; echo
+    read -r -s -p "$prompt [$def]: " reply || reply=""
+    # Write newline to stderr to properly separate prompts
+    echo >&2
   else
     read -r -p "$prompt [$def]: " reply || reply=""
   fi
