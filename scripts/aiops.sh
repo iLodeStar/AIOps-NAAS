@@ -89,8 +89,12 @@ ask_input() {
 
 set_env_kv() {
   local key="$1" value="$2" file="$ROOT_DIR/.env"
+  
   if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file"
+    # Use grep -v to remove the line, then append the new one
+    # This avoids sed delimiter issues entirely
+    grep -v "^${key}=" "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+    echo "${key}=${value}" >> "$file"
   else
     echo "${key}=${value}" >> "$file"
   fi
