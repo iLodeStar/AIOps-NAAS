@@ -9,8 +9,10 @@ This guide walks you through setting up the AIOps NAAS platform on your own comp
 If you get stuck at any point, see the Troubleshooting section at the end.
 
 References:
+- **One-Click Setup** (recommended for beginners): ./one-click.md
 - Edge vs Core architecture: ../architecture.md
 - Keycloak OIDC setup (step-by-step with screenshots): ../onboarding/oidc-keycloak-setup.md
+- Keycloak quick setup: ./keycloak.md
 - Onboarding Service user guide: ../onboarding/guide.md
 - Production deployment (hardening, TLS, HA): ./production.md
 

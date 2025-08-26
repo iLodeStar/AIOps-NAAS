@@ -1,0 +1,20 @@
+# Optional overrides to route credentials into services and enable Grafana OIDC via Keycloak.
+services:
+  grafana:
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-${GRAFANA_ADMIN_USER:-admin}}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-${GRAFANA_ADMIN_PASSWORD:-admin}}
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_SIGNOUT_REDIRECT_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/logout
+      - GF_AUTH_GENERIC_OAUTH_ENABLED=${GF_AUTH_GENERIC_OAUTH_ENABLED:-true}
+      - GF_AUTH_GENERIC_OAUTH_NAME=Keycloak
+      - GF_AUTH_GENERIC_OAUTH_CLIENT_ID=${KC_GRAFANA_CLIENT_ID:-grafana}
+      - GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET=${KC_GRAFANA_CLIENT_SECRET:-}
+      - GF_AUTH_GENERIC_OAUTH_AUTH_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/auth
+      - GF_AUTH_GENERIC_OAUTH_TOKEN_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/token
+      - GF_AUTH_GENERIC_OAUTH_API_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/userinfo
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://localhost:3000/}
+  clickhouse:
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
