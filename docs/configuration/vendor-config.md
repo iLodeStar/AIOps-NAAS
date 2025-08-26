@@ -223,6 +223,43 @@ WEATHER_API_KEY=your_openweather_api_key
 
 # External Systems
 SCHEDULE_API_KEY=your_schedule_api_key
+
+# OLLAMA LLM Configuration
+OLLAMA_DEFAULT_MODEL=mistral
+OLLAMA_AUTO_PULL=true
+```
+
+### OLLAMA LLM Configuration
+
+Configure the large language model used for AI/ML operations:
+
+**Environment Variables:**
+- `OLLAMA_DEFAULT_MODEL`: Model to automatically pull and use (default: `mistral`)
+- `OLLAMA_AUTO_PULL`: Whether to automatically pull the model on startup (default: `true`)
+
+**Available Models:**
+- `mistral` - Recommended lightweight model (7B parameters)
+- `llama2` - Meta's Llama 2 model 
+- `codellama` - Code-specialized model
+- `phi` - Microsoft's Phi model (small, efficient)
+- `neural-chat` - Intel's conversational model
+
+**Model Selection Guidelines:**
+- **Development/Testing**: Use `mistral` or `phi` (smaller, faster)
+- **Production**: Consider `llama2` for better accuracy (larger size)
+- **Code Analysis**: Use `codellama` for software-related tasks
+
+**Manual Override:**
+```bash
+# Change model via environment
+export OLLAMA_DEFAULT_MODEL=llama2
+bash scripts/aiops.sh up --all
+
+# Change model via command line
+bash scripts/aiops.sh up --all --ollama-model phi
+
+# Disable automatic pulling
+export OLLAMA_AUTO_PULL=false
 ```
 
 ### Security Best Practices

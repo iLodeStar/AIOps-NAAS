@@ -55,6 +55,7 @@ Common flags (for non-interactive):
   --require-docker-health     Require Docker health=healthy (default: use app health when known)
   --exclude "svc1 svc2"       Exclude services by name
   --no-fix                    Disable auto-fixes
+  --ollama-model <model>      Specify OLLAMA model to pull (default: mistral)
 
 Examples:
   bash scripts/aiops.sh                 # wizard (yes/no prompts)
@@ -363,6 +364,15 @@ run_wizard() {
   fi
 
   if [[ "$MODE" != "service" ]]; then
+    if [[ "$MODE" == "all" ]] && ask_yes_no "Do you want to configure OLLAMA LLM model (included in full mode)?" "Y"; then
+      local ollama_model
+      ollama_model="$(ask_input "OLLAMA model to use" "mistral" "false")"
+      if [[ -n "$ollama_model" && "$ollama_model" != "mistral" ]]; then
+        log "Setting OLLAMA_DEFAULT_MODEL to: $ollama_model"
+        set_env_kv "OLLAMA_DEFAULT_MODEL" "$ollama_model"
+      fi
+    fi
+    
     if ask_yes_no "Run data simulation after startup (sends synthetic metrics)?" "Y"; then
       RUN_SIMULATION=true
     fi
@@ -453,6 +463,18 @@ start_by_plan() {
     log "Skipping heavy services in minimal mode. Choose 'Start everything' in wizard to include them."
   fi
 
+  # OLLAMA bootstrap - pull and configure default model if service is running
+  if docker compose ps ollama | grep -q "Up"; then
+    log "OLLAMA service detected, running bootstrap..."
+    if [[ -x "$ROOT_DIR/scripts/ollama_bootstrap.sh" ]]; then
+      bash "$ROOT_DIR/scripts/ollama_bootstrap.sh" || warn "OLLAMA bootstrap failed; check logs. You may need to manually run: docker compose exec ollama ollama pull mistral"
+    else
+      warn "OLLAMA bootstrap script not found."
+    fi
+  elif [[ "$MODE" == "all" ]]; then
+    log "OLLAMA service not running, skipping model bootstrap."
+  fi
+
   if [[ "$RUN_SIMULATION" == "true" ]]; then
     if [[ -x "$ROOT_DIR/scripts/simulate_data.sh" ]]; then
       log "Running data simulation..."
@@ -479,7 +501,7 @@ start_by_plan() {
 }
 
 cmd_up() {
-  local service=""
+  local service="" ollama_model=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --all) MODE="all"; shift ;;
@@ -493,12 +515,20 @@ cmd_up() {
       --ask-creds) ASK_CREDS=true; shift ;;
       --with-keycloak) WITH_KEYCLOAK=true; shift ;;
       --simulate) RUN_SIMULATION=true; shift ;;
+      --ollama-model) ollama_model="${2:-}"; shift 2 ;;
       --help|-h) usage; exit 0 ;;
       *) error "Unknown flag: $1"; usage; exit 1 ;;
     esac
   done
 
   ensure_env
+  
+  # Set OLLAMA model if specified via command line
+  if [[ -n "$ollama_model" ]]; then
+    log "Setting OLLAMA_DEFAULT_MODEL to: $ollama_model"
+    set_env_kv "OLLAMA_DEFAULT_MODEL" "$ollama_model"
+  fi
+  
   [[ "$ASK_CREDS" == "true" ]] && prompt_credentials
   start_by_plan
 }
