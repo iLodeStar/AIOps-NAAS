@@ -1,4 +1,5 @@
 # Optional overrides to route credentials into services and enable Grafana OIDC via Keycloak.
+# Also fixes node-exporter mount propagation issues on WSL2 and private-root environments.
 services:
   grafana:
     environment:
@@ -18,3 +19,20 @@ services:
     environment:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+
+  # Node Exporter - Override for WSL2/private-root mount compatibility
+  node-exporter:
+    volumes:
+      - '/:/host:ro,rprivate'  # Use rprivate instead of rslave to avoid bind propagation issues
+    command:
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--web.disable-exporter-metrics'  # Reduce noise in metrics
+      - '--collector.disable-defaults'   # Disable collectors that may fail on limited filesystems
+      - '--collector.cpu'                # Enable only essential collectors  
+      - '--collector.meminfo'
+      - '--collector.filesystem'
+      - '--collector.loadavg'
+      - '--collector.time'
