@@ -20,25 +20,9 @@ read_from = "beginning"
 type = "remap"
 inputs = ["host_metrics"]
 source = '''
-counter_val = if exists(.counter) { .counter.value } else { null }
-gauge_val = if exists(.gauge) { .gauge.value } else { null }
-
-. = {
-  "timestamp": format_timestamp!(.timestamp, format: "%Y-%m-%d %H:%M:%S%.3f"),
-  "level": "INFO", 
-  "message": "Host metric collected: " + to_string!(.name),
-  "source": "host_metrics",
-  "host": "ship-01",
-  "service": "system-monitor", 
-  "raw_log": encode_json(.),
-  "labels": .tags,
-  "name": to_string!(.name),
-  "namespace": to_string!(.namespace),
-  "tags": .tags,
-  "kind": to_string!(.kind),
-  "counter_value": counter_val,
-  "gauge_value": gauge_val
-}
+.level = "INFO"
+.source = "host_metrics"
+.message = "Host metric collected"
 '''
 
 [transforms.syslog_for_logs]
@@ -83,7 +67,7 @@ source = '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["metrics_for_logs"]
+inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
