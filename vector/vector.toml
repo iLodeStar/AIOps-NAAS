@@ -20,21 +20,24 @@ read_from = "beginning"
 type = "remap"
 inputs = ["host_metrics"]
 source = '''
+counter_val = if exists(.counter) { .counter.value } else { null }
+gauge_val = if exists(.gauge) { .gauge.value } else { null }
+
 . = {
-  "timestamp": .timestamp,
-  "level": "INFO",
+  "timestamp": format_timestamp!(.timestamp, format: "%Y-%m-%d %H:%M:%S%.3f"),
+  "level": "INFO", 
+  "message": "Host metric collected: " + to_string!(.name),
   "source": "host_metrics",
-  "message": "Host metric collected",
   "host": "ship-01",
-  "service": "system-monitor",
+  "service": "system-monitor", 
   "raw_log": encode_json(.),
-  "labels": {},
-  "name": "",
-  "namespace": "",
-  "tags": {},
-  "kind": "",
-  "counter_value": null,
-  "gauge_value": null
+  "labels": .tags,
+  "name": to_string!(.name),
+  "namespace": to_string!(.namespace),
+  "tags": .tags,
+  "kind": to_string!(.kind),
+  "counter_value": counter_val,
+  "gauge_value": gauge_val
 }
 '''
 
