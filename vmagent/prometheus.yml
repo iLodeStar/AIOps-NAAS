@@ -29,3 +29,10 @@ scrape_configs:
       - targets: ['grafana:3000']
     scrape_interval: 60s
     metrics_path: /metrics
+
+  # Network Device Collector metrics
+  - job_name: 'network-device-collector'
+    static_configs:
+      - targets: ['network-device-collector:8080']
+    scrape_interval: 30s
+    metrics_path: /metrics

@@ -29,6 +29,115 @@ network_devices:
     interval_seconds: 30
     batch_size: 100
     concurrent_workers: 4
+    
+  # Maritime-specific network device types
+  device_inventory:
+    switches:
+      - name: "core-switch-bridge"
+        ip: "${BRIDGE_SWITCH_IP:-192.168.1.10}"
+        type: "cisco_catalyst"
+        model: "WS-C2960X-24TS-L"
+        location: "bridge"
+        critical: true
+        monitoring_profile: "enhanced"
+        
+      - name: "engine-room-switch"
+        ip: "${ENGINE_SWITCH_IP:-192.168.1.20}"
+        type: "cisco_catalyst"
+        model: "WS-C2960X-48TS-L"
+        location: "engine_room"
+        critical: true
+        environmental_hardened: true
+        
+      - name: "guest-network-switch"
+        ip: "${GUEST_SWITCH_IP:-192.168.1.30}"
+        type: "hp_aruba"
+        model: "2930F-24G-4SFP+"
+        location: "guest_areas"
+        critical: false
+        
+    routers:
+      - name: "primary-gateway"
+        ip: "${PRIMARY_ROUTER_IP:-192.168.1.1}"
+        type: "cisco_isr"
+        model: "ISR4331"
+        location: "comms_room"
+        critical: true
+        satellite_connected: true
+        
+      - name: "backup-gateway"
+        ip: "${BACKUP_ROUTER_IP:-192.168.1.2}"
+        type: "cisco_isr"
+        model: "ISR4221"
+        location: "comms_room"
+        critical: true
+        satellite_connected: true
+        
+    firewalls:
+      - name: "perimeter-firewall"
+        ip: "${FIREWALL_IP:-192.168.1.5}"
+        type: "fortinet"
+        model: "FortiGate-100F"
+        location: "comms_room" 
+        critical: true
+        throughput_monitoring: true
+        
+    wifi_infrastructure:
+      - name: "wifi-controller"
+        ip: "${WIFI_CTRL_IP:-192.168.1.40}"
+        type: "aruba"
+        model: "7030"
+        location: "comms_room"
+        critical: true
+        manages_aps: true
+        
+      - name: "bridge-ap-01"
+        ip: "${BRIDGE_AP1_IP:-192.168.1.41}"
+        type: "aruba_ap"
+        model: "AP-315"
+        location: "bridge"
+        critical: true
+        
+      - name: "dining-ap-01"
+        ip: "${DINING_AP1_IP:-192.168.1.42}"
+        type: "aruba_ap"
+        model: "AP-305"
+        location: "dining_area"
+        critical: false
+        
+    network_appliances:
+      - name: "nas-storage"
+        ip: "${NAS_IP:-192.168.1.50}"
+        type: "synology"
+        model: "DS920+"
+        location: "server_room"
+        critical: true
+        backup_system: true
+        
+      - name: "ups-network"
+        ip: "${UPS_IP:-192.168.1.60}"
+        type: "apc"
+        model: "SMT3000RMI2UNC"
+        location: "server_room"
+        critical: true
+        power_monitoring: true
+        
+    maritime_specific:
+      - name: "vsat-modem"
+        ip: "${VSAT_MODEM_IP:-192.168.1.100}"
+        type: "vsat_terminal"
+        model: "iDirect X7"
+        location: "deck_equipment"
+        critical: true
+        satellite_terminal: true
+        
+      - name: "inmarsat-terminal"
+        ip: "${INMARSAT_IP:-192.168.1.101}"
+        type: "inmarsat"
+        model: "FleetBroadband 500"
+        location: "deck_equipment"
+        critical: true
+        backup_satellite: true
 
 # Satellite RF Equipment Configuration
 satellite_rf:

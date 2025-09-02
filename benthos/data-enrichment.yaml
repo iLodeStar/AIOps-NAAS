@@ -179,6 +179,78 @@ pipeline:
           }
         }
         
+        # Network device enrichment with system and satellite context
+        if this.data_source == "network" {
+          root.enrichment_context.network_correlation = {
+            "device_type": this.original_data.device_type || "unknown",
+            "device_ip": this.original_data.device_ip || this.original_data.ip_address,
+            "vendor": this.original_data.vendor || "unknown",
+            "location": this.original_data.location || "unknown"
+          }
+          
+          # Correlate network performance with system load
+          if system_data != null {
+            root.enrichment_context.network_correlation.system_context = {
+              "cpu_utilization": system_data.original_data.cpu_percent || null,
+              "memory_utilization": system_data.original_data.memory_percent || null,
+              "load_average": system_data.original_data.load1 || null
+            }
+            
+            # Network anomaly context based on system load
+            let cpu = system_data.original_data.cpu_percent
+            if cpu != null && cpu > 85 && this.original_data.interface_utilization_percent != null {
+              root.enrichment_context.network_correlation.high_load_correlation = true
+            }
+          }
+          
+          # Correlate network with satellite link quality
+          if related != null && related.data_source == "satellite" {
+            root.enrichment_context.network_correlation.satellite_context = {
+              "satellite_snr": related.original_data.snr_db || null,
+              "satellite_ber": related.original_data.ber || null,
+              "rain_fade_margin": related.original_data.rain_fade_margin_db || null
+            }
+            
+            # Mark satellite-dependent network components  
+            if this.original_data.device_type.or("") == "router" || this.original_data.device_type.or("") == "firewall" {
+              root.enrichment_context.network_correlation.satellite_dependent = true
+            }
+          }
+          
+          # Network device health assessment  
+          if this.original_data.cpu_utilization_percent != null || this.original_data.memory_utilization_percent != null {
+            root.enrichment_context.network_correlation.device_health = {
+              "cpu_healthy": (this.original_data.cpu_utilization_percent || 0) < 80,
+              "memory_healthy": (this.original_data.memory_utilization_percent || 0) < 85,
+              "temperature_healthy": (this.original_data.temperature_celsius || 0) < 50
+            }
+          }
+          
+          # Interface-specific correlation for switches and routers
+          if this.original_data.interfaces != null && this.original_data.interfaces.type() == "array" {
+            root.enrichment_context.network_correlation.critical_interfaces = []
+            for interface in this.original_data.interfaces {
+              if interface.utilization_percent != null && interface.utilization_percent > 80 {
+                root.enrichment_context.network_correlation.critical_interfaces = 
+                  root.enrichment_context.network_correlation.critical_interfaces.append({
+                    "interface": interface.interface_name,
+                    "utilization": interface.utilization_percent,
+                    "status": interface.oper_status || "unknown"
+                  })
+              }
+            }
+          }
+        }
+        
+        # System enrichment with network device context
+        if this.data_source == "system" && related != null && related.data_source == "network" {
+          root.enrichment_context.network_infrastructure = {
+            "core_network_health": related.original_data.device_health || "unknown",
+            "network_device_count": 1,  # Simplified for this correlation
+            "critical_network_services": if related.original_data.device_type.or("") == "router" || related.original_data.device_type.or("") == "firewall" { ["routing", "security"] } else { ["switching"] }
+          }
+        }
+        
         # High system load affecting network
         if this.enrichment_context.system_load != null {
           let cpu = this.enrichment_context.system_load.cpu_usage

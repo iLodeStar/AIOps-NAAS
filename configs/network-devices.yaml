@@ -1,0 +1,251 @@
+# Network Device Collector Configuration for Maritime AIOps
+# Configuration for SNMP-based discovery and monitoring of network infrastructure
+
+# Device Discovery Configuration
+discovery:
+  # IP ranges to scan for network devices
+  ip_ranges:
+    - "192.168.1.0/24"    # Ship management network
+    - "10.0.0.0/24"       # Core infrastructure network
+    - "172.16.0.0/24"     # WiFi and guest network
+    - "10.1.0.0/24"       # VSAT and satellite network
+  
+  # SNMP communities to try during discovery
+  snmp_communities:
+    - "public"
+    - "private"
+    - "${SNMP_RO_COMMUNITY:-ship_monitor}"
+  
+  # Discovery timing
+  scan_interval: 300      # Full network scan every 5 minutes
+  timeout: 5             # SNMP timeout in seconds
+  retries: 3             # Number of retries per device
+
+# Device Monitoring Configuration  
+monitoring:
+  polling_interval: 30          # Metrics collection interval in seconds
+  interface_monitoring: true    # Collect per-interface metrics
+  health_monitoring: true       # Collect device health (CPU, memory, temperature)
+  topology_discovery: true      # Discover network topology via LLDP/CDP
+  
+  # Maritime-specific monitoring
+  maritime_context:
+    location_integration: true       # Include ship location in metrics
+    weather_correlation: true       # Correlate with weather conditions
+    satellite_link_awareness: true  # Consider satellite link quality
+    critical_path_monitoring: true  # Monitor critical communication paths
+
+# Device Type Specific Configuration
+device_types:
+  switches:
+    priority: "high"
+    enhanced_monitoring: true
+    collect_vlan_info: true
+    collect_spanning_tree: true
+    collect_port_security: true
+    
+  routers:
+    priority: "critical"
+    enhanced_monitoring: true
+    collect_routing_table: false  # Avoid large routing tables on ships
+    collect_interface_counters: true
+    collect_bgp_status: true
+    
+  firewalls:
+    priority: "critical" 
+    enhanced_monitoring: true
+    collect_connection_count: true
+    collect_throughput_stats: true
+    collect_security_events: true
+    
+  wifi_controllers:
+    priority: "medium"
+    enhanced_monitoring: true
+    collect_ap_status: true
+    collect_client_count: true
+    collect_channel_utilization: true
+    
+  access_points:
+    priority: "medium"
+    enhanced_monitoring: false
+    collect_client_count: true
+    collect_signal_strength: true
+
+# Vendor-Specific Configuration
+vendors:
+  cisco:
+    enabled: true
+    mibs:
+      - "CISCO-PROCESS-MIB"
+      - "CISCO-MEMORY-POOL-MIB"
+      - "CISCO-ENVMON-MIB"
+      - "CISCO-ENTITY-SENSOR-MIB"
+    custom_oids:
+      cpu_utilization: "1.3.6.1.4.1.9.9.109.1.1.1.1.7"
+      memory_utilization: "1.3.6.1.4.1.9.9.48.1.1.1.5"
+      temperature: "1.3.6.1.4.1.9.9.13.1.3.1.3"
+      
+  juniper:
+    enabled: true
+    mibs:
+      - "JUNIPER-MIB"
+      - "JUNIPER-CHASSIS-DEFINES-MIB"
+    custom_oids:
+      cpu_utilization: "1.3.6.1.4.1.2636.3.1.13.1.8"
+      memory_utilization: "1.3.6.1.4.1.2636.3.1.13.1.11"
+      
+  fortinet:
+    enabled: true
+    mibs:
+      - "FORTINET-FORTIGATE-MIB"
+    custom_oids:
+      cpu_utilization: "1.3.6.1.4.1.12356.101.4.1.3"
+      memory_utilization: "1.3.6.1.4.1.12356.101.4.1.4"
+      session_count: "1.3.6.1.4.1.12356.101.4.1.8"
+      
+  hp_aruba:
+    enabled: true
+    mibs:
+      - "HP-ICF-OID"
+      - "ARUBA-MIB"
+    custom_oids:
+      cpu_utilization: "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1"
+      memory_utilization: "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6"
+
+# Critical Infrastructure Monitoring
+critical_infrastructure:
+  # Define critical network paths for maritime operations
+  critical_paths:
+    - name: "satellite_uplink"
+      description: "Primary satellite communication path"
+      devices: 
+        - "192.168.1.1"  # Primary router
+        - "192.168.1.10" # Satellite modem/router
+      monitoring_interval: 15  # More frequent monitoring
+      
+    - name: "navigation_network" 
+      description: "Navigation and bridge systems network"
+      devices:
+        - "10.0.0.1"     # Navigation switch
+        - "10.0.0.10"    # GPS/GNSS systems
+        - "10.0.0.20"    # Bridge equipment
+      monitoring_interval: 30
+      
+    - name: "safety_systems"
+      description: "Safety and emergency communication systems"
+      devices:
+        - "172.16.0.1"   # Safety systems switch
+        - "172.16.0.10"  # Emergency communication
+      monitoring_interval: 15
+      alert_threshold_lower: true  # More sensitive alerting
+
+# Maritime Environmental Considerations
+environmental:
+  # Temperature thresholds adjusted for maritime environment
+  temperature_thresholds:
+    warning: 45.0    # Celsius - higher for ship environments
+    critical: 55.0   # Celsius
+    
+  # Humidity considerations
+  humidity_monitoring: true
+  salt_air_corrosion_tracking: true
+  
+  # Power system integration
+  power_monitoring:
+    ups_integration: true
+    generator_status_correlation: true
+    power_quality_monitoring: true
+
+# NATS Integration
+nats:
+  servers: 
+    - "nats://nats:4222"
+  subjects:
+    device_discovery: "telemetry.network.discovery"
+    interface_metrics: "telemetry.network.interfaces"
+    device_health: "telemetry.network.health"
+    topology_changes: "telemetry.network.topology"
+    critical_alerts: "alerts.network.critical"
+    
+  # Maritime context in messages
+  message_enrichment:
+    include_ship_location: true
+    include_weather_context: true
+    include_satellite_status: true
+    include_operational_mode: true
+
+# Prometheus Metrics
+prometheus:
+  port: 8080
+  metrics_prefix: "aiops_network"
+  
+  # Custom metrics for maritime operations
+  custom_metrics:
+    - name: "critical_path_health"
+      type: "gauge"
+      description: "Health score for critical network paths"
+      labels: ["path_name", "device_type"]
+      
+    - name: "maritime_network_stability"
+      type: "gauge" 
+      description: "Overall network stability score considering environmental factors"
+      labels: ["environmental_condition", "operational_mode"]
+      
+    - name: "satellite_dependent_services"
+      type: "gauge"
+      description: "Count of services dependent on satellite connectivity"
+      labels: ["service_type", "criticality"]
+
+# Alerting Configuration
+alerting:
+  # Maritime-specific alert conditions
+  conditions:
+    - name: "critical_path_failure"
+      description: "Critical network path has failed"
+      severity: "critical"
+      condition: "critical_path_health < 0.5"
+      
+    - name: "environmental_impact"
+      description: "Network performance degraded due to environmental conditions"
+      severity: "warning"
+      condition: "environmental_temperature > 50 OR humidity > 85"
+      
+    - name: "satellite_link_degraded"
+      description: "Satellite-dependent network services at risk"
+      severity: "warning"
+      condition: "satellite_link_quality < 0.7 AND satellite_dependent_services > 0"
+      
+  # Notification channels
+  channels:
+    - type: "nats"
+      subject: "alerts.network.maritime"
+      
+    - type: "webhook"
+      url: "http://incident-api:8083/api/incidents"
+      
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "json"
+  
+  # Maritime-specific log fields
+  fields:
+    ship_id: "${SHIP_ID:-UNKNOWN}"
+    voyage_id: "${VOYAGE_ID:-}"
+    location: "${SHIP_LOCATION:-unknown}"
+    
+# Security Configuration
+security:
+  # SNMP security
+  snmp_v3:
+    enabled: false  # Enable if SNMPv3 is available
+    users: []
+    
+  # Access control
+  allowed_networks:
+    - "192.168.0.0/16"
+    - "10.0.0.0/8" 
+    - "172.16.0.0/12"
+    
+  # Encryption
+  encrypt_nats_messages: false  # Enable if NATS TLS is configured

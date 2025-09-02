@@ -132,7 +132,7 @@ class TwoLevelCorrelationTestPublisher:
         }
     
     def generate_network_data(self, scenario: str = "normal") -> Dict[str, Any]:
-        """Generate network performance data"""
+        """Generate comprehensive network device data"""
         base_latency = 120.0  # ms
         base_throughput = 50.0  # Mbps
         base_packet_loss = 0.1  # %
@@ -149,11 +149,47 @@ class TwoLevelCorrelationTestPublisher:
         return {
             "timestamp": datetime.now().isoformat(),
             "ship_id": self.ship_id,
+            "device_ip": "192.168.1.10",
+            "device_type": "switch",
+            "vendor": "cisco", 
+            "hostname": "core-switch-bridge",
+            "location": "bridge",
+            "cpu_utilization_percent": 25.0 + random.uniform(-10, 40) if scenario != "high_load" else 85.0 + random.uniform(-5, 10),
+            "memory_utilization_percent": 40.0 + random.uniform(-15, 30) if scenario != "high_load" else 90.0 + random.uniform(-5, 5),
+            "temperature_celsius": 42.0 + random.uniform(-5, 8),
+            "power_supply_status": "normal",
+            "fan_status": "normal",
+            # Network performance metrics
             "latency_ms": base_latency + random.uniform(-20, 50),
             "throughput_mbps": base_throughput + random.uniform(-10, 20),
             "packet_loss_percent": max(0, base_packet_loss + random.uniform(-0.5, 2.0)),
             "jitter_ms": random.uniform(5, 25),
-            "connection_count": random.randint(50, 200)
+            "connection_count": random.randint(50, 200),
+            # Interface metrics
+            "interfaces": [
+                {
+                    "interface_name": "GigabitEthernet1/0/1",
+                    "interface_index": 1,
+                    "admin_status": "up",
+                    "oper_status": "up", 
+                    "utilization_percent": random.uniform(20, 80) if scenario == "high_load" else random.uniform(10, 40),
+                    "in_octets": random.randint(1000000, 10000000),
+                    "out_octets": random.randint(1000000, 10000000),
+                    "in_errors": random.randint(0, 5),
+                    "out_errors": random.randint(0, 5)
+                },
+                {
+                    "interface_name": "GigabitEthernet1/0/24",
+                    "interface_index": 24,
+                    "admin_status": "up",
+                    "oper_status": "up",
+                    "utilization_percent": random.uniform(15, 60) if scenario == "high_load" else random.uniform(5, 25),
+                    "in_octets": random.randint(500000, 5000000),
+                    "out_octets": random.randint(500000, 5000000),
+                    "in_errors": random.randint(0, 2),
+                    "out_errors": random.randint(0, 2)
+                }
+            ]
         }
     
     def generate_ship_telemetry(self) -> Dict[str, Any]:
@@ -185,7 +221,7 @@ class TwoLevelCorrelationTestPublisher:
             await self.nats_client.publish("metrics.system.performance", json.dumps(system_data).encode())
             await self.nats_client.publish("telemetry.satellite.rf", json.dumps(satellite_data).encode())
             await self.nats_client.publish("external.weather.conditions", json.dumps(weather_data).encode())
-            await self.nats_client.publish("telemetry.network.performance", json.dumps(network_data).encode())
+            await self.nats_client.publish("telemetry.network.devices", json.dumps(network_data).encode())
             await self.nats_client.publish("telemetry.ship.navigation", json.dumps(ship_data).encode())
             
             logger.info(f"Published raw data set for scenario: {scenario}")
