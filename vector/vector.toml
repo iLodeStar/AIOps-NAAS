@@ -20,20 +20,8 @@ read_from = "beginning"
 type = "remap"
 inputs = ["host_metrics"]
 source = '''
-.timestamp = .timestamp
 .level = "INFO"
-.source = "host_metrics"
-.host = "ship-01" 
-.service = "system-monitor"
-.message = "Host metric collected"
-.raw_log = encode_json(.)
-.labels = {}
-.name = ""
-.namespace = ""  
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
+.test_field = "TRANSFORMED"
 '''
 
 [transforms.syslog_for_logs]
@@ -84,13 +72,14 @@ table = "raw"
 database = "logs"
 compression = "gzip"
 skip_unknown_fields = true
-batch.max_events = 1
-batch.timeout_secs = 1
+batch.max_events = 10
+batch.timeout_secs = 5
+healthcheck.enabled = true
 
 # Add a debug sink to console to see what data is being sent
 [sinks.console_debug]
 type = "console"
-inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
+inputs = ["metrics_for_logs"]
 target = "stdout"
 encoding.codec = "json"
 
