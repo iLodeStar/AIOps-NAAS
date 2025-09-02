@@ -287,6 +287,72 @@ services:
       retries: 3
       start_period: 30s
 
+  # Benthos Data Enrichment - Level 1 correlation for raw data enrichment
+  benthos-enrichment:
+    image: jeffail/benthos:latest
+    container_name: aiops-benthos-enrichment
+    ports:
+      - "4196:4196"  # HTTP API
+    volumes:
+      - ./benthos/data-enrichment.yaml:/benthos.yaml:ro
+    command: ["-c", "/benthos.yaml"]
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4196/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Enhanced Anomaly Detection - Context-aware anomaly detection with enriched data
+  enhanced-anomaly-detection:
+    build:
+      context: ./services/enhanced-anomaly-detection
+      dockerfile: Dockerfile
+    container_name: aiops-enhanced-anomaly-detection
+    ports:
+      - "8082:8082"
+    environment:
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=INFO
+    depends_on:
+      nats:
+        condition: service_healthy
+      benthos-enrichment:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Network Device Collector - SNMP-based network infrastructure monitoring
+  network-device-collector:
+    build:
+      context: ./services/network-device-collector
+      dockerfile: Dockerfile
+    container_name: aiops-network-device-collector
+    ports:
+      - "8088:8080"  # Prometheus metrics
+    volumes:
+      - ./configs/network-devices.yaml:/app/config.yaml:ro
+    environment:
+      - LOG_LEVEL=INFO
+      - NATS_SERVERS=nats://nats:4222
+      - PROMETHEUS_PORT=8080
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    privileged: false  # SNMP doesn't require privileged access
+
   # Incident API - REST API for incident management
   incident-api:
     build:
