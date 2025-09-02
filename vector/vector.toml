@@ -17,22 +17,21 @@ include = ["/var/log/sample/*.log"]
 read_from = "beginning"
 
 [transforms.metrics_for_logs]
-type = "remap"
+type = "metric_to_log"
 inputs = ["host_metrics"]
+
+[transforms.format_for_clickhouse]
+type = "remap"
+inputs = ["metrics_for_logs"]
 source = '''
-# Convert metrics to log format for ClickHouse - Simple approach
-.timestamp = .timestamp
 .level = "INFO"
 .source = "host_metrics"
-.host = if exists(.host) { string!(.host) } else { "unknown" }
-.service = "metrics-collector"
-.message = "Host metrics collected"
+.message = "Metric: " + string!(.name) + " = " + string!(.counter.value)
+.service = "metrics-collector" 
 .raw_log = encode_json(.)
-
-# Set required fields for ClickHouse table
+.labels = {}
 .name = ""
 .namespace = ""
-.labels = {}
 .tags = {}
 .kind = ""
 .counter_value = null
@@ -81,7 +80,7 @@ source = '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
+inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
@@ -97,14 +96,14 @@ request.retry_max_duration_secs = 10
 # Debug sink to see ONLY transformed data
 [sinks.transform_debug]
 type = "console"
-inputs = ["metrics_for_logs"]
+inputs = ["format_for_clickhouse"]
 target = "stdout"
 encoding.codec = "json"
 
-# Additional debug sink for raw metrics to compare
-[sinks.raw_metrics_debug]
-type = "console"
-inputs = ["host_metrics"]
-target = "stdout"
-encoding.codec = "json"
+# DISABLED - Additional debug sink for raw metrics to compare
+#[sinks.raw_metrics_debug]
+#type = "console"
+#inputs = ["host_metrics"]
+#target = "stdout"  
+#encoding.codec = "json"
 
