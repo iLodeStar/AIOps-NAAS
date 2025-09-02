@@ -15,6 +15,7 @@ services:
       - GF_AUTH_GENERIC_OAUTH_TOKEN_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/token
       - GF_AUTH_GENERIC_OAUTH_API_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/userinfo
       - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://localhost:3000/}
+
   clickhouse:
     environment:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
@@ -23,7 +24,7 @@ services:
   # Node Exporter - Override for WSL2/private-root mount compatibility
   node-exporter:
     volumes:
-      - '/:/host:ro,rprivate'  # Use rprivate instead of rslave to avoid bind propagation issues
+      - '/:/host:ro,rslave'  # Use rprivate instead of rslave to avoid bind propagation issues
     command:
       - '--path.rootfs=/host'
       - '--path.procfs=/host/proc'
@@ -36,3 +37,17 @@ services:
       - '--collector.filesystem'
       - '--collector.loadavg'
       - '--collector.time'
+
+  vector:
+    image: timberio/vector:0.49.0-debian
+    volumes:
+      - /var/log/syslog:/var/log/syslog:ro
+      - /var/log/messages:/var/log/messages:ro
+      - /var/log/sample/:/var/log/sample/:ro
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
+      - VECTOR_LOG=trace
+    ports:
+      - "8686:8686"

@@ -1,5 +1,4 @@
-name: aiops-naas
-
+# aiops-naas: Multi-service Docker Compose file
 # For environment configuration, copy .env.example to .env and customize
 # See configs/vendor-integrations.example.yaml for vendor-specific settings
 
@@ -15,9 +14,9 @@ services:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse123}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
       interval: 30s
@@ -178,13 +177,15 @@ services:
 
   # Vector - Log processing and routing
   vector:
-    image: timberio/vector:latest-alpine
+    image: timberio/vector:0.49.0-debian
     container_name: aiops-vector
     volumes:
       - ./vector/vector.toml:/etc/vector/vector.toml:ro
       - ./sample-logs:/var/log/sample:ro
       - vector_data:/var/lib/vector
     command: ["--config", "/etc/vector/vector.toml"]
+    ports:
+      - "8686:8686"
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -382,7 +383,7 @@ services:
 
   # v0.4 Services - Fleet Reporting, Capacity Forecasting, Cross-Ship Benchmarking
 
-  # Fleet Aggregation Service - Central fleet data collection and aggregation  
+  # Fleet Aggregation Service - Central fleet data collection and aggregation
   fleet-aggregation:
     build:
       context: ./services/fleet-aggregation
@@ -506,3 +507,4 @@ volumes:
   vector_data:
   alertmanager_data:
   onboarding_data:
+  

@@ -1,51 +1,44 @@
-# Vector configuration for AIOps NAAS
-# Simplified config that tails logs and forwards them
-
 [api]
 enabled = true
 address = "0.0.0.0:8686"
 
-# Source: Tail log files from sample-logs directory
-[sources.sample_logs]
-type = "file"
-include = ["/var/log/sample/*.log"]
-ignore_older_secs = 86400
-read_from = "beginning"
+[sources.host_metrics]
+type = "host_metrics"
+scrape_interval_secs = 10
 
-# Transform: Add basic metadata to logs
-[transforms.parse_logs]
+[transforms.metrics_for_logs]
 type = "remap"
-inputs = ["sample_logs"]
+inputs = ["host_metrics"]
 source = '''
-  .timestamp = now()
-  .level = "INFO"
-  .message = .message
-  .source = "vector"
-  .host = "ship-01"
-  .service = "unknown"
-  .raw_log = .message
-  .labels = {"environment": "local", "version": "1.0.0"}
+.timestamp = .timestamp
+.level = "INFO"
+.message = .name
+.source = "host_metrics"
+.host = if exists(.tags) && exists(.tags.host) { .tags.host } else { "unknown" }
+.service = if exists(.tags) && exists(.tags.collector) { .tags.collector } else { "metrics" }
+.raw_log = encode_json(.)
+.labels = if exists(.tags) { .tags } else { {} }
+.name = .name
+.namespace = .namespace
+.tags = if exists(.tags) { .tags } else { {} }
+.kind = .kind
+.counter_value = if exists(.counter) { .counter.value } else { null }
+.gauge_value = if exists(.gauge) { .gauge.value } else { null }
 '''
 
-# Sink: Console output for debugging
-[sinks.console]
-type = "console"
-inputs = ["parse_logs"]
-
-[sinks.console.encoding]
-codec = "json"
-
-# Sink: Send logs to ClickHouse
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["parse_logs"]
+inputs = ["metrics_for_logs"]
 endpoint = "http://clickhouse:8123"
-table = "logs.raw"
+table = "raw"
 database = "logs"
 compression = "gzip"
 skip_unknown_fields = true
+batch.max_events = 1
+batch.timeout_secs = 1
 
 [sinks.clickhouse.auth]
 strategy = "basic"
-user = "${CLICKHOUSE_USER:-default}"
-password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
+user = "admin"
+password = "admin"
+

@@ -1,9 +1,7 @@
 -- ClickHouse initialization script for AIOps NAAS
--- Create database and tables for log ingestion
-
 CREATE DATABASE IF NOT EXISTS logs;
 
--- Raw logs table for JSON log ingestion via Vector
+-- Raw logs & metrics table for Vector JSON ingestion
 CREATE TABLE IF NOT EXISTS logs.raw (
     timestamp DateTime64(3) DEFAULT now64(),
     level LowCardinality(String),
@@ -12,7 +10,14 @@ CREATE TABLE IF NOT EXISTS logs.raw (
     host LowCardinality(String),
     service LowCardinality(String),
     raw_log String,
-    labels Map(String, String)
+    labels Map(String, String),
+    -- Metrics fields
+    name String,
+    namespace String,
+    tags Map(String, String),
+    kind String,
+    counter_value Float64,
+    gauge_value Float64
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (timestamp, source, level)
