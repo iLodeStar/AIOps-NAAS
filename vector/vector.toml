@@ -19,7 +19,22 @@ read_from = "beginning"
 [transforms.metrics_for_logs]
 type = "remap"
 inputs = ["host_metrics"]
-source = '.level = "INFO"'
+source = '''
+.timestamp = .timestamp
+.level = "INFO"
+.source = "host_metrics"
+.host = "ship-01" 
+.service = "system-monitor"
+.message = "Host metric collected"
+.raw_log = encode_json(.)
+.labels = {}
+.name = ""
+.namespace = ""  
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+'''
 
 [transforms.syslog_for_logs]
 type = "remap"  
@@ -78,9 +93,4 @@ type = "console"
 inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
 target = "stdout"
 encoding.codec = "json"
-
-[sinks.clickhouse.auth]
-strategy = "basic"
-user = "default"
-password = "changeme_clickhouse"
 
