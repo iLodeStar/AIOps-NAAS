@@ -19,22 +19,7 @@ read_from = "beginning"
 [transforms.metrics_for_logs]
 type = "remap"
 inputs = ["host_metrics"]
-source = '''
-.timestamp = .timestamp
-.level = "INFO"
-.message = .name
-.source = "host_metrics"
-.host = if exists(.tags) && exists(.tags.host) { .tags.host } else { "unknown" }
-.service = if exists(.tags) && exists(.tags.collector) { .tags.collector } else { "metrics" }
-.raw_log = encode_json(.)
-.labels = if exists(.tags) { .tags } else { {} }
-.name = .name
-.namespace = .namespace
-.tags = if exists(.tags) { .tags } else { {} }
-.kind = .kind
-.counter_value = if exists(.counter) { .counter.value } else { null }
-.gauge_value = if exists(.gauge) { .gauge.value } else { null }
-'''
+source = '.level = "INFO"'
 
 [transforms.syslog_for_logs]
 type = "remap"  
@@ -78,7 +63,7 @@ source = '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["metrics_for_logs"]
+inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
@@ -90,7 +75,7 @@ batch.timeout_secs = 1
 # Add a debug sink to console to see what data is being sent
 [sinks.console_debug]
 type = "console"
-inputs = ["metrics_for_logs"]
+inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
 target = "stdout"
 encoding.codec = "json"
 
