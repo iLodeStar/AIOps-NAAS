@@ -6,6 +6,16 @@ address = "0.0.0.0:8686"
 type = "host_metrics"
 scrape_interval_secs = 10
 
+[sources.syslog]
+type = "syslog"
+address = "0.0.0.0:1514"
+mode = "tcp"
+
+[sources.file_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+read_from = "beginning"
+
 [transforms.metrics_for_logs]
 type = "remap"
 inputs = ["host_metrics"]
@@ -26,19 +36,59 @@ source = '''
 .gauge_value = if exists(.gauge) { .gauge.value } else { null }
 '''
 
+[transforms.syslog_for_logs]
+type = "remap"  
+inputs = ["syslog"]
+source = '''
+.timestamp = .timestamp
+.level = "INFO"
+.message = .message
+.source = "syslog"
+.host = if exists(.hostname) { .hostname } else { "unknown" }
+.service = if exists(.appname) { .appname } else { "system" }
+.raw_log = encode_json(.)
+.labels = {}
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+'''
+
+[transforms.file_logs_processed]
+type = "remap"
+inputs = ["file_logs"]
+source = '''
+.timestamp = .timestamp
+.level = .level
+.message = .message
+.source = "file"
+.host = .host
+.service = .service
+.raw_log = encode_json(.)
+.labels = if exists(.labels) { .labels } else { {} }
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+'''
+
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["metrics_for_logs"]
+inputs = ["metrics_for_logs", "syslog_for_logs", "file_logs_processed"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
 compression = "gzip"
 skip_unknown_fields = true
-batch.max_events = 1
-batch.timeout_secs = 1
+batch.max_events = 10
+batch.timeout_secs = 5
 
 [sinks.clickhouse.auth]
 strategy = "basic"
-user = "admin"
-password = "admin"
+user = "default"
+password = "changeme_clickhouse"
 
