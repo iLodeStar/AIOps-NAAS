@@ -6,39 +6,125 @@ address = "0.0.0.0:8686"
 type = "host_metrics"
 scrape_interval_secs = 10
 
+[sources.syslog]
+type = "syslog"
+address = "0.0.0.0:1514"
+mode = "tcp"
+
+[sources.file_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+read_from = "beginning"
+
 [transforms.metrics_for_logs]
-type = "remap"
+type = "metric_to_log"
 inputs = ["host_metrics"]
+
+[transforms.format_for_clickhouse]
+type = "remap"
+inputs = ["metrics_for_logs"]
+source = '''
+# Extract metric value from either counter or gauge
+metric_value = if exists(.counter) { .counter.value } else if exists(.gauge) { .gauge.value } else { 0.0 }
+metric_name = .name
+
+# Set required ClickHouse fields with proper error handling  
+.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
+.level = "INFO"
+.source = "host_metrics"
+.message, err = "Metric: " + to_string(metric_name) + " = " + to_string(metric_value)
+if err != null { .message = "Metric processing error" }
+.host, err = to_string(.host)  
+if err != null { .host = "unknown" }
+.service = "metrics-collector"
+.raw_log = encode_json(.)
+.labels = if exists(.tags) { .tags } else { {} }
+
+# Clear/set metric-specific fields to match ClickHouse schema
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+# Remove original metric structure
+del(.counter)
+del(.gauge)
+'''
+
+[transforms.syslog_for_logs]
+type = "remap"  
+inputs = ["syslog"]
 source = '''
 .timestamp = .timestamp
 .level = "INFO"
-.message = .name
-.source = "host_metrics"
-.host = if exists(.tags) && exists(.tags.host) { .tags.host } else { "unknown" }
-.service = if exists(.tags) && exists(.tags.collector) { .tags.collector } else { "metrics" }
+.message = .message
+.source = "syslog"
+.host = if exists(.hostname) { .hostname } else { "unknown" }
+.service = if exists(.appname) { .appname } else { "system" }
 .raw_log = encode_json(.)
-.labels = if exists(.tags) { .tags } else { {} }
-.name = .name
-.namespace = .namespace
-.tags = if exists(.tags) { .tags } else { {} }
-.kind = .kind
-.counter_value = if exists(.counter) { .counter.value } else { null }
-.gauge_value = if exists(.gauge) { .gauge.value } else { null }
+.labels = {}
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+'''
+
+[transforms.file_logs_processed]
+type = "remap"
+inputs = ["file_logs"]
+source = '''
+.timestamp = .timestamp
+.level = .level
+.message = .message
+.source = "file"
+.host = .host
+.service = .service
+.raw_log = encode_json(.)
+.labels = if exists(.labels) { .labels } else { {} }
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
 '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["metrics_for_logs"]
+inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
 compression = "gzip"
 skip_unknown_fields = true
-batch.max_events = 1
-batch.timeout_secs = 1
+batch.max_events = 100
+batch.timeout_secs = 5
+healthcheck.enabled = true
+request.timeout_secs = 30
+request.retry_attempts = 3
+request.retry_max_duration_secs = 10
 
-[sinks.clickhouse.auth]
-strategy = "basic"
-user = "admin"
-password = "admin"
+# Debug sink to see ONLY transformed data
+[sinks.transform_debug]
+type = "console"
+inputs = ["format_for_clickhouse"]
+target = "stdout"
+encoding.codec = "json"
+
+# Raw metrics debug sink to compare input vs output
+[sinks.raw_metrics_debug]
+type = "console"
+inputs = ["metrics_for_logs"]
+target = "stderr"
+encoding.codec = "json"
+
+# DISABLED - Additional debug sink for raw metrics to compare
+#[sinks.raw_metrics_debug]
+#type = "console"
+#inputs = ["host_metrics"]
+#target = "stdout"  
+#encoding.codec = "json"
 
