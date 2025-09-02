@@ -6,17 +6,26 @@ http:
   address: "0.0.0.0:4195"
   debug_endpoints: true
 
-# Input: Consume anomaly events from NATS (basic, not JetStream)
+# Input: Consume anomaly events from NATS (both regular and enriched)
 input:
-  nats:
-    urls: ["nats://nats:4222"]
-    subject: "anomaly.detected"
-    queue: "correlation_processor"
+  broker:
+    inputs:
+      # Original anomaly events from basic anomaly detection
+      - nats:
+          urls: ["nats://nats:4222"]
+          subject: "anomaly.detected"
+          queue: "correlation_processor_basic"
+          
+      # Enriched anomaly events from enhanced anomaly detection
+      - nats:
+          urls: ["nats://nats:4222"]
+          subject: "anomaly.detected.enriched"
+          queue: "correlation_processor_enriched"
 
 # Pipeline for event processing and correlation
 pipeline:
   processors:
-    # Parse and enrich anomaly events
+    # Parse and enrich anomaly events (both regular and enriched)
     - mapping: |
         root.correlation_id = uuid_v4()
         root.processing_timestamp = now()
@@ -34,11 +43,25 @@ pipeline:
           "unknown"
         }
         
-        # Add severity based on anomaly score
+        # Handle both regular and enriched anomalies
+        root.is_enriched = if this.correlation_level == "level_1_enriched" {
+          true
+        } else {
+          false
+        }
+        
+        # Preserve enrichment context if available
+        root.enrichment_context = this.enrichment_context || {}
+        root.maritime_context = this.maritime_context || {}
+        root.operational_status = this.operational_status || "normal"
+        
+        # Add severity based on anomaly score and operational status
         root.severity = if this.anomaly_score > 0.9 {
           "critical"
         } else if this.anomaly_score > 0.7 {
           "warning"  
+        } else if this.operational_status == "weather_impacted" || this.operational_status == "system_overloaded" {
+          "warning"  # Bump severity for problematic operational states
         } else {
           "info"
         }
@@ -63,7 +86,7 @@ pipeline:
         operator: "get"  
         key: "${! if json(\"metric_name\") == \"cpu_usage\" { \"memory_usage_\" + json(\"ship_id\") } else if json(\"metric_name\") == \"memory_usage\" { \"cpu_usage_\" + json(\"ship_id\") } else { \"\" } }"
         
-    # Create correlated incident
+    # Create correlated incident (enhanced for enriched anomalies)
     - mapping: |
         root.incident_type = "single_anomaly"
         
@@ -74,29 +97,61 @@ pipeline:
           null
         }
         
-        # Create correlated incident if both CPU and memory are anomalous
-        root.incident_type = if related != null && 
+        # Enhanced correlation for enriched anomalies
+        if this.is_enriched && this.operational_status != "normal" {
+          # Create enriched operational incident
+          root.incident_type = if this.operational_status == "weather_impacted" {
+            "weather_degradation"
+          } else if this.operational_status == "system_overloaded" {
+            "system_overload"
+          } else if this.operational_status == "degraded_comms" {
+            "communication_issues"
+          } else {
+            "operational_anomaly"
+          }
+        } else if related != null && 
           ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
            (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
-          "resource_pressure"
+          # Traditional CPU/memory correlation
+          root.incident_type = "resource_pressure"
+        } else if this.is_enriched && this.enrichment_context != {} {
+          # Multi-source correlation for enriched data
+          if (this.metric_name.contains("satellite") && this.enrichment_context.weather_impact != null) {
+            root.incident_type = "satellite_weather_impact"
+          } else if (this.metric_name.contains("network") && this.enrichment_context.system_load != null) {
+            root.incident_type = "network_system_correlation"
+          } else {
+            root.incident_type = "enriched_anomaly"
+          }
         } else {
-          "single_anomaly"
+          root.incident_type = "single_anomaly"
         }
         
-        # Add correlation details
+        # Add correlation details with enrichment context
         root.correlated_events = if related != null {
           [this, related]  
         } else {
           [this]
         }
         
-        # Calculate incident severity
+        # Enhanced incident severity calculation
         root.incident_severity = if this.severity == "critical" || (related != null && related.severity == "critical") {
           "critical"
         } else if this.severity == "warning" || (related != null && related.severity == "warning") {
           "warning"
+        } else if this.is_enriched && (this.operational_status == "weather_impacted" || this.operational_status == "system_overloaded") {
+          "warning"  # Boost severity for enriched operational issues
         } else {
           "info"
+        }
+        
+        # Add enrichment metadata to incident
+        root.enrichment_metadata = {
+          "has_enrichment": this.is_enriched || false,
+          "enrichment_context": this.enrichment_context || {},
+          "maritime_context": this.maritime_context || {},
+          "operational_status": this.operational_status || "normal",
+          "correlation_sources": if this.context_sources != null { this.context_sources } else { [] }
         }
         
     # Suppression - check if similar incident exists
@@ -136,13 +191,27 @@ pipeline:
                 }
               ]
               
-              # Add runbook suggestions based on incident type
+              # Enhanced runbook suggestions based on incident type and enrichment
               root.suggested_runbooks = if this.incident_type == "resource_pressure" {
                 ["investigate_high_resource_usage", "scale_resources"]
+              } else if this.incident_type == "weather_degradation" {
+                ["weather_response_protocol", "switch_backup_comm", "adjust_satellite_parameters"]
+              } else if this.incident_type == "satellite_weather_impact" {
+                ["satellite_rain_fade_mitigation", "increase_tx_power", "switch_to_backup_satellite"]
+              } else if this.incident_type == "communication_issues" {
+                ["comm_system_diagnostics", "antenna_alignment_check", "backup_communication"]
+              } else if this.incident_type == "system_overload" {
+                ["load_balancing", "process_optimization", "resource_scaling"]
+              } else if this.incident_type == "network_system_correlation" {
+                ["network_performance_tuning", "system_resource_check", "qos_adjustment"]
               } else if this.metric_name == "cpu_usage" {
                 ["investigate_cpu_usage"]  
               } else if this.metric_name == "memory_usage" {
                 ["investigate_memory_usage"]
+              } else if this.metric_name.contains("satellite") {
+                ["satellite_diagnostics", "signal_quality_check"]
+              } else if this.metric_name.contains("network") {
+                ["network_diagnostics", "connectivity_check"]
               } else {
                 ["generic_investigation"]
               }
