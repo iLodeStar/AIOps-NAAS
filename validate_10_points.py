@@ -144,10 +144,18 @@ def main():
     
     # Point 5: Validate if metrics are pushed to clickhouse
     logger.info("Checking Point 5: Metrics pushed to ClickHouse")
-    success, output = run_command("docker compose logs vector | grep -i clickhouse | tail -5")
-    metrics_pushed = success and ("clickhouse" in output.lower() and "200" in output)
-    results.add_result(5, "Metrics pushed to ClickHouse", metrics_pushed,
-                      f"Vector logs show ClickHouse interaction")
+    # Check if ClickHouse is receiving new data (better indicator than log parsing)
+    success, result = query_clickhouse("SELECT count() FROM logs.raw WHERE timestamp >= now() - INTERVAL 1 MINUTE")
+    if success:
+        try:
+            recent_count = int(result)
+            metrics_pushed = recent_count > 0
+            results.add_result(5, "Metrics pushed to ClickHouse", metrics_pushed,
+                              f"Recent ClickHouse insertions: {recent_count} records")
+        except ValueError:
+            results.add_result(5, "Metrics pushed to ClickHouse", False, f"Invalid count result: {result}")
+    else:
+        results.add_result(5, "Metrics pushed to ClickHouse", False, f"Query failed: {result}")
     
     # Point 6: Validate clickhouse receives the data
     logger.info("Checking Point 6: ClickHouse receives data")
@@ -173,12 +181,23 @@ def main():
     success, details = check_url("http://localhost:8686/health")
     results.add_result(8, "Vector API external access", success, details)
     
-    # Point 9: Validate vector can connect to clickhouse
+    # Point 9: Validate vector can connect to clickhouse  
     logger.info("Checking Point 9: Vector-ClickHouse connectivity")
-    success, output = run_command("docker compose logs vector | grep -E '(clickhouse|HTTP.*200)' | tail -3")
-    connectivity_ok = success and ("200" in output or "OK" in output)
-    results.add_result(9, "Vector-ClickHouse connectivity", connectivity_ok,
-                      f"Recent connection logs show success")
+    # Check if Vector transform debug sink is active (indicates healthy pipeline)
+    success, output = run_command("docker compose logs vector | grep -E '(transform_debug.*events_sent|transform_debug.*bytes_sent)' | tail -3")
+    pipeline_active = success and "events_sent" in output
+    # Also verify ClickHouse connectivity by checking recent data flow
+    ch_success, ch_result = query_clickhouse("SELECT count() FROM logs.raw WHERE timestamp >= now() - INTERVAL 2 MINUTE")
+    if ch_success:
+        try:
+            recent_data = int(ch_result) > 0
+            connectivity_ok = pipeline_active and recent_data
+            results.add_result(9, "Vector-ClickHouse connectivity", connectivity_ok,
+                              f"Pipeline active: {pipeline_active}, Recent data: {recent_data}")
+        except ValueError:
+            results.add_result(9, "Vector-ClickHouse connectivity", False, f"Data validation failed")
+    else:
+        results.add_result(9, "Vector-ClickHouse connectivity", False, f"ClickHouse query failed")
     
     # Point 10: Validate data sent to clickhouse is same as outcome of transformation
     logger.info("Checking Point 10: Data consistency")

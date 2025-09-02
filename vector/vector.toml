@@ -24,18 +24,32 @@ inputs = ["host_metrics"]
 type = "remap"
 inputs = ["metrics_for_logs"]
 source = '''
+# Extract metric value from either counter or gauge
+metric_value = if exists(.counter) { .counter.value } else if exists(.gauge) { .gauge.value } else { 0.0 }
+metric_name = .name
+
+# Set required ClickHouse fields with proper error handling  
+.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
 .source = "host_metrics"
-.message = "Metric: " + string!(.name) + " = " + string!(.counter.value)
-.service = "metrics-collector" 
+.message, err = "Metric: " + to_string(metric_name) + " = " + to_string(metric_value)
+if err != null { .message = "Metric processing error" }
+.host, err = to_string(.host)  
+if err != null { .host = "unknown" }
+.service = "metrics-collector"
 .raw_log = encode_json(.)
-.labels = {}
+.labels = if exists(.tags) { .tags } else { {} }
+
+# Clear/set metric-specific fields to match ClickHouse schema
 .name = ""
 .namespace = ""
 .tags = {}
 .kind = ""
 .counter_value = null
 .gauge_value = null
+# Remove original metric structure
+del(.counter)
+del(.gauge)
 '''
 
 [transforms.syslog_for_logs]
@@ -98,6 +112,13 @@ request.retry_max_duration_secs = 10
 type = "console"
 inputs = ["format_for_clickhouse"]
 target = "stdout"
+encoding.codec = "json"
+
+# Raw metrics debug sink to compare input vs output
+[sinks.raw_metrics_debug]
+type = "console"
+inputs = ["metrics_for_logs"]
+target = "stderr"
 encoding.codec = "json"
 
 # DISABLED - Additional debug sink for raw metrics to compare
