@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Manual Validation Testing Helper Script
-# Provides step-by-step validation for AIOps NAAS platform
+# End-to-End Manual Validation Testing Helper Script
+# Provides step-by-step message tracking validation for AIOps NAAS platform
 #
 
 set -e
@@ -11,10 +11,23 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
+# Generate unique tracking ID for this session
+TRACKING_ID="E2E-$(date +%Y%m%d-%H%M%S)-$(uuidgen | cut -d'-' -f1)"
+
+print_header() {
+    echo -e "\n${PURPLE}=============================================${NC}"
+    echo -e "${PURPLE} AIOps NAAS End-to-End Validation Testing${NC}"
+    echo -e "${PURPLE}=============================================${NC}"
+    echo -e "${BLUE}TRACKING ID: $TRACKING_ID${NC}"
+    echo -e "${BLUE}Use this ID to track your test message through all components${NC}"
+    echo -e "${PURPLE}=============================================${NC}\n"
+}
+
 print_step() {
-    echo -e "\n${BLUE}=== $1 ===${NC}"
+    echo -e "\n${BLUE}=== STEP $1 ===${NC}"
 }
 
 print_success() {
@@ -33,6 +46,10 @@ print_info() {
     echo -e "${BLUE}ℹ️  $1${NC}"
 }
 
+print_command() {
+    echo -e "${PURPLE}Command:${NC} $1"
+}
+
 # Function to wait for user input with screenshots
 wait_for_screenshot() {
     echo -e "\n${YELLOW}📸 SCREENSHOT REQUIRED:${NC} $1"
@@ -40,377 +57,313 @@ wait_for_screenshot() {
     read -r
 }
 
-# Function to check service health
-check_service_health() {
-    local service_name=$1
-    local health_url=$2
-    local expected_response=${3:-"healthy"}
-    
-    echo -n "Checking $service_name health... "
-    if curl -sf "$health_url" > /dev/null 2>&1; then
-        print_success "$service_name is healthy"
-        return 0
-    else
-        print_error "$service_name health check failed"
-        return 1
-    fi
+# Function to wait for user confirmation
+wait_for_confirmation() {
+    echo -e "\n${BLUE}$1${NC}"
+    echo "Press Enter to continue..."
+    read -r
 }
 
-# Function to test endpoint with JSON pretty print
-test_endpoint() {
-    local name=$1
-    local url=$2
-    echo -e "\n${BLUE}Testing $name endpoint:${NC}"
-    echo "URL: $url"
-    
-    if command -v jq > /dev/null; then
-        curl -s "$url" | jq . 2>/dev/null || curl -s "$url" 2>/dev/null || echo "Endpoint not responding"
-    else
-        curl -s "$url" 2>/dev/null || echo "Endpoint not responding"
-    fi
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
 }
 
-print_header() {
-    echo -e "\n${GREEN}================================================${NC}"
-    echo -e "${GREEN}     AIOps NAAS Manual Validation Testing${NC}"
-    echo -e "${GREEN}================================================${NC}"
-    echo ""
-    echo "This script will guide you through the 5-step validation process."
-    echo "Screenshots will be required at various steps."
-    echo ""
-}
-
-# Step 0: Pre-validation checks
-pre_validation_checks() {
-    print_step "Pre-Validation: Docker Environment Setup"
+# Check prerequisites
+check_prerequisites() {
+    print_step "PRE-VALIDATION: Prerequisites Check"
     
     # Check Docker
-    if ! command -v docker > /dev/null; then
+    if ! command_exists docker; then
         print_error "Docker not found. Please install Docker first."
         exit 1
     fi
+    print_success "Docker is installed"
     
-    if ! command -v docker-compose > /dev/null && ! docker compose version > /dev/null 2>&1; then
+    # Check Docker Compose
+    if ! command_exists docker-compose && ! docker compose version > /dev/null 2>&1; then
         print_error "Docker Compose not found. Please install Docker Compose."
         exit 1
     fi
+    print_success "Docker Compose is available"
     
-    print_success "Docker and Docker Compose are installed"
+    # Check netcat
+    if ! command_exists nc; then
+        print_error "netcat (nc) not found. Please install netcat for syslog testing."
+        exit 1
+    fi
+    print_success "netcat is available for syslog testing"
     
-    # Check if we're in the right directory
+    # Check if in right directory
     if [[ ! -f "docker-compose.yml" ]]; then
         print_error "docker-compose.yml not found. Please run this script from the AIOps-NAAS root directory."
         exit 1
     fi
+    print_success "Found docker-compose.yml in current directory"
+}
+
+# Validate service health
+validate_services() {
+    print_step "PRE-VALIDATION: Service Health Check"
     
-    print_success "Found docker-compose.yml"
-    
-    # Check services status
-    print_info "Checking Docker services status..."
+    print_info "Checking all Docker services..."
     docker compose ps --format="table {{.Name}}\t{{.Status}}\t{{.Ports}}"
     
-    echo ""
-    echo "Review the services above. All should show 'Up' or 'Up (healthy)' status."
-    echo "If any services are down, run 'docker compose up -d' first."
-    echo ""
-    read -p "Do all services appear to be running? (y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_warning "Starting services..."
-        docker compose up -d
-        print_info "Waiting 60 seconds for services to initialize..."
-        sleep 60
-        docker compose ps
-    fi
+    echo -e "\n${BLUE}Key services that must be healthy:${NC}"
+    echo "- aiops-vector (ports 8686, 1514)"
+    echo "- aiops-clickhouse (ports 8123, 9000)" 
+    echo "- aiops-nats (ports 4222, 8222)"
+    echo "- aiops-benthos (port 4195)"
+    echo "- aiops-anomaly-detection (port 8080)"
+    
+    wait_for_confirmation "Review the service status above. If any critical services are down, restart them with 'docker compose up -d [service-name]'"
 }
 
-# Step 1: Syslog capture validation
-step1_syslog_capture() {
-    print_step "Step 1: Syslog Capture Validation"
+# Step 1: Send and track normal message
+step1_normal_message() {
+    print_step "1: Send Normal Test Message & Track Vector Processing"
     
-    # Check rsyslog
-    print_info "Checking rsyslog service..."
-    if systemctl is-active --quiet rsyslog; then
-        print_success "rsyslog is running"
+    echo -e "${BLUE}Objective:${NC} Send a uniquely identifiable test message and verify Vector receives and processes it."
+    echo -e "${BLUE}Tracking ID:${NC} $TRACKING_ID"
+    
+    print_info "Sending NORMAL message to Vector syslog port (1514)..."
+    
+    print_command "echo \"<14>\$(date '+%b %d %H:%M:%S') \$(hostname) validation-test: NORMAL $TRACKING_ID System operational, all services running\" | nc -u localhost 1514"
+    
+    # Send the message
+    echo "<14>$(date '+%b %d %H:%M:%S') $(hostname) validation-test: NORMAL $TRACKING_ID System operational, all services running" | nc -u localhost 1514
+    
+    print_success "Normal test message sent with tracking ID: $TRACKING_ID"
+    
+    # Wait for processing
+    sleep 5
+    
+    print_info "Checking Vector logs for your message..."
+    print_command "docker compose logs vector --tail 50 | grep \"$TRACKING_ID\""
+    
+    if docker compose logs vector --tail 50 | grep "$TRACKING_ID" > /dev/null; then
+        print_success "Message found in Vector logs!"
+        docker compose logs vector --tail 50 | grep "$TRACKING_ID"
     else
-        print_warning "rsyslog may not be running. Check with: sudo systemctl status rsyslog"
+        print_warning "Message not immediately visible in Vector logs - this may be normal"
     fi
-    
-    # Generate test syslogs
-    print_info "Generating test syslog messages..."
-    logger "TEST: Manual validation syslog entry $(date)"
-    logger -p user.info "TEST: Info level message for validation"
-    logger -p user.warning "TEST: Warning level message for validation" 
-    logger -p user.err "TEST: Error level message for validation"
-    
-    print_success "Test syslog messages generated"
-    
-    # Test syslog forwarding to Vector
-    print_info "Testing syslog forwarding to Vector (port 514)..."
-    echo "<14>$(date '+%b %d %H:%M:%S') $(hostname) validation-test: Manual testing syslog message" | nc -u localhost 514 2>/dev/null || {
-        print_warning "netcat not available or Vector not listening on port 514"
-        print_info "You can install netcat with: sudo apt install netcat-openbsd"
-    }
-    
-    # Check Vector logs
-    print_info "Checking Vector service logs for syslog processing..."
-    docker compose logs vector --tail 20
-    
-    wait_for_screenshot "Vector logs showing syslog processing activity"
-    
-    print_success "Step 1 completed: Syslog capture validated"
-}
-
-# Step 2: Log reading service validation
-step2_log_reading_service() {
-    print_step "Step 2: Log Reading Service (Vector) Validation"
-    
-    # Identify Vector service
-    print_info "Vector is the log reading service in this architecture"
-    
-    # Check Vector version
-    print_info "Checking Vector version..."
-    docker compose exec vector vector --version 2>/dev/null || print_warning "Could not get Vector version"
     
     # Check Vector health
-    print_info "Testing Vector health endpoints..."
+    print_info "Checking Vector health and metrics..."
+    if curl -sf http://localhost:8686/health > /dev/null; then
+        print_success "Vector health check passed"
+    else
+        print_warning "Vector health endpoint not responding"
+    fi
     
-    # Vector may expose different endpoints, try common ones
-    for port in 8686 9598 8080; do
-        if curl -sf "http://localhost:$port/health" > /dev/null 2>&1; then
-            print_success "Vector health endpoint found on port $port"
-            test_endpoint "Vector Health" "http://localhost:$port/health"
-            break
-        fi
-    done
+    # Check Vector port
+    print_info "Verifying Vector is listening on syslog port 1514..."
+    if netstat -ulnp 2>/dev/null | grep 1514 > /dev/null || ss -ulnp 2>/dev/null | grep 1514 > /dev/null; then
+        print_success "Vector is listening on port 1514"
+    else
+        print_warning "Cannot confirm Vector is listening on port 1514"
+    fi
     
-    # Check Vector metrics
-    print_info "Checking Vector metrics..."
-    for port in 8686 9598 9090; do
-        if curl -sf "http://localhost:$port/metrics" > /dev/null 2>&1; then
-            print_success "Vector metrics endpoint found on port $port"
-            echo "Sample metrics:"
-            curl -s "http://localhost:$port/metrics" | head -10
-            break
-        fi
-    done
-    
-    # Show Vector processing logs
-    print_info "Vector processing logs:"
-    docker compose logs vector --tail 30
-    
-    wait_for_screenshot "Vector service logs and any available UI/metrics endpoints"
-    
-    # Test data flow from Vector
-    print_info "Testing data flow from Vector with new message..."
-    echo "<14>$(date '+%b %d %H:%M:%S') $(hostname) step2-test: Vector validation message" | nc -u localhost 514 2>/dev/null || echo "Test message sent"
-    
-    sleep 5
-    print_info "Recent Vector logs after test message:"
-    docker compose logs vector --tail 10
-    
-    print_success "Step 2 completed: Vector log reading service validated"
+    wait_for_screenshot "Screenshot of Vector logs showing your TRACKING_ID message processing"
 }
 
-# Step 3: Log transformation and storage
-step3_log_storage() {
-    print_step "Step 3: Log Transformation and Storage (ClickHouse) Validation"
+# Step 2: Track message in ClickHouse
+step2_clickhouse_storage() {
+    print_step "2: Track Message Storage in ClickHouse"
     
-    # Check ClickHouse health
-    check_service_health "ClickHouse" "http://localhost:8123/ping"
+    echo -e "${BLUE}Objective:${NC} Verify your test message was transformed and stored in ClickHouse logs.raw table."
     
-    # Show ClickHouse version
-    print_info "ClickHouse version information:"
-    curl -s "http://localhost:8123/" | head -5
-    
-    # Check databases and tables
-    print_info "Checking ClickHouse databases..."
-    docker compose exec clickhouse clickhouse-client --query "SHOW DATABASES" 2>/dev/null || print_warning "Could not access ClickHouse client"
-    
-    print_info "Checking for log tables..."
-    docker compose exec clickhouse clickhouse-client --query "SHOW TABLES" 2>/dev/null || print_warning "Could not list tables"
-    
-    # Test log insertion
-    print_info "Sending test log for storage validation..."
-    echo "<14>$(date '+%b %d %H:%M:%S') $(hostname) clickhouse-test: Storage validation message" | nc -u localhost 514 2>/dev/null || echo "Test log sent"
-    
+    print_info "Waiting additional 10 seconds for message processing..."
     sleep 10
     
-    # Try to query logs (structure may vary)
-    print_info "Attempting to query stored logs..."
-    docker compose exec clickhouse clickhouse-client --query "SELECT * FROM logs ORDER BY timestamp DESC LIMIT 5" 2>/dev/null || \
-    docker compose exec clickhouse clickhouse-client --query "SELECT name, engine FROM system.tables WHERE database != 'system'" 2>/dev/null || \
-    print_warning "Log table structure varies - manual investigation needed in ClickHouse UI"
+    print_info "Querying ClickHouse for your specific message..."
+    print_command "docker compose exec clickhouse clickhouse-client --query \"SELECT timestamp, level, message, source, host, service FROM logs.raw WHERE message LIKE '%$TRACKING_ID%' ORDER BY timestamp DESC LIMIT 5\""
     
-    # ClickHouse UI access
-    print_info "ClickHouse Play UI is available at: http://localhost:8123/play"
-    print_info "You can run queries like: SELECT name FROM system.tables WHERE database != 'system'"
+    if docker compose exec clickhouse clickhouse-client --query "SELECT timestamp, level, message, source, host, service FROM logs.raw WHERE message LIKE '%$TRACKING_ID%' ORDER BY timestamp DESC LIMIT 5" 2>/dev/null; then
+        print_success "Message found in ClickHouse!"
+    else
+        print_error "Message not found in ClickHouse - checking connection..."
+        if curl -sf http://localhost:8123/ping > /dev/null; then
+            print_info "ClickHouse is responding - message may still be processing"
+        else
+            print_error "ClickHouse health check failed"
+        fi
+    fi
     
-    wait_for_screenshot "ClickHouse Play UI interface and any log query results"
+    print_info "Checking ClickHouse Play UI access..."
+    echo -e "${BLUE}ClickHouse Play UI:${NC} http://localhost:8123/play"
+    echo -e "${BLUE}Credentials:${NC} default/clickhouse123"
+    echo -e "${BLUE}Test Query:${NC} SELECT * FROM logs.raw WHERE message LIKE '%$TRACKING_ID%' ORDER BY timestamp DESC LIMIT 1"
     
-    print_success "Step 3 completed: ClickHouse log storage validated"
+    wait_for_screenshot "Screenshot of ClickHouse Play UI showing your TRACKING_ID message in the query results"
 }
 
-# Step 4: Data enrichment and correlation
-step4_correlation() {
-    print_step "Step 4: Data Enrichment and Correlation Validation"
+# Step 3: Send anomaly message and track
+step3_anomaly_detection() {
+    print_step "3: Simulate Anomaly Detection Path"
     
-    # Check NATS message bus
-    print_info "Checking NATS message bus..."
-    test_endpoint "NATS" "http://localhost:8222/varz"
+    echo -e "${BLUE}Objective:${NC} Generate an anomaly message, track it through VictoriaMetrics and verify anomaly detection."
+    
+    print_info "Sending ANOMALY message to simulate high CPU usage..."
+    print_command "echo \"<14>\$(date '+%b %d %H:%M:%S') \$(hostname) cpu-monitor: ANOMALY $TRACKING_ID CPU usage critical at 98% - threshold exceeded\" | nc -u localhost 1514"
+    
+    # Send anomaly message
+    echo "<14>$(date '+%b %d %H:%M:%S') $(hostname) cpu-monitor: ANOMALY $TRACKING_ID CPU usage critical at 98% - threshold exceeded" | nc -u localhost 1514
+    
+    print_success "Anomaly message sent with tracking ID: $TRACKING_ID"
+    sleep 10
+    
+    print_info "Verifying anomaly message in ClickHouse..."
+    if docker compose exec clickhouse clickhouse-client --query "SELECT timestamp, message, source, service FROM logs.raw WHERE message LIKE '%ANOMALY%$TRACKING_ID%' ORDER BY timestamp DESC LIMIT 1" 2>/dev/null; then
+        print_success "Anomaly message found in ClickHouse!"
+    else
+        print_warning "Anomaly message not yet visible in ClickHouse"
+    fi
+    
+    print_info "Checking VictoriaMetrics for metric data..."
+    if curl -s "http://localhost:8428/api/v1/query?query=up" | grep -q "success"; then
+        print_success "VictoriaMetrics is responding with metric data"
+    else
+        print_warning "VictoriaMetrics not responding or no metrics available"
+    fi
+    
+    print_info "Checking anomaly detection service..."
+    if curl -sf http://localhost:8080/health > /dev/null; then
+        print_success "Anomaly detection service is healthy"
+        docker compose logs anomaly-detection --tail 10
+    else
+        print_warning "Anomaly detection service not responding"
+    fi
+}
+
+# Step 4: Track NATS message bus
+step4_nats_messaging() {
+    print_step "4: Track Messages Through NATS Message Bus"
+    
+    echo -e "${BLUE}Objective:${NC} Monitor NATS for anomaly events and verify message bus functionality."
+    
+    print_info "Checking NATS server statistics..."
+    if curl -sf http://localhost:8222/varz > /dev/null; then
+        print_success "NATS monitoring interface is accessible"
+        curl -s http://localhost:8222/varz | grep -E "(connections|in_msgs|out_msgs)" | head -5
+    else
+        print_warning "NATS monitoring interface not responding"
+    fi
+    
+    print_info "Checking NATS subscriptions and topics..."
+    if curl -sf http://localhost:8222/subsz > /dev/null; then
+        print_success "NATS subscriptions endpoint accessible"
+        echo -e "${BLUE}Expected subjects should include:${NC}"
+        echo "- anomaly.detected"
+        echo "- anomaly.detected.enriched" 
+        echo "- incidents.created"
+    else
+        print_warning "NATS subscriptions endpoint not responding"
+    fi
     
     print_info "NATS Monitoring UI: http://localhost:8222"
     
-    # Check Benthos correlation service
-    print_info "Checking Benthos correlation service..."
-    docker compose logs benthos --tail 20
+    wait_for_screenshot "Screenshot of NATS monitoring UI at http://localhost:8222 showing message activity"
+}
+
+# Step 5: Benthos correlation and incidents
+step5_benthos_correlation() {
+    print_step "5: Validate Benthos Event Correlation & Incident Creation"
     
-    # Test correlation with multiple anomalies
-    print_info "Testing correlation logic with multiple related anomalies..."
+    echo -e "${BLUE}Objective:${NC} Verify Benthos processes NATS messages, applies correlation rules, and creates incidents."
     
-    # Check if we have test script
-    if [[ -f "scripts/publish_test_anomalies.py" ]]; then
-        print_info "Running test anomaly publisher..."
-        python3 scripts/publish_test_anomalies.py 2>/dev/null || print_warning "Test script execution failed"
+    print_info "Checking Benthos health and configuration..."
+    if curl -sf http://localhost:4195/ping > /dev/null; then
+        print_success "Benthos is responding to health checks"
     else
-        print_info "Generating manual test anomalies..."
-        # Try to send via anomaly detection service API
-        curl -X POST "http://localhost:8080/test/anomaly" -H "Content-Type: application/json" \
-          -d '{"metric":"cpu_usage","value":85.5,"threshold":70,"timestamp":"'$(date -Iseconds)'"}' 2>/dev/null || \
-        print_info "Direct API test not available - correlation will be tested via pipeline"
-        
-        sleep 2
-        curl -X POST "http://localhost:8080/test/anomaly" -H "Content-Type: application/json" \
-          -d '{"metric":"memory_usage","value":92.3,"threshold":80,"timestamp":"'$(date -Iseconds)'"}' 2>/dev/null || \
-        print_info "Second anomaly sent"
+        print_warning "Benthos health check failed"
     fi
     
-    sleep 10
-    
-    # Check for correlated incidents
-    print_info "Checking for correlated incidents..."
-    test_endpoint "Incidents API" "http://localhost:8081/incidents"
-    
-    # Show correlation service logs
-    print_info "Benthos correlation logs:"
-    docker compose logs benthos --tail 15
-    
-    print_info "NATS message activity:"
-    docker compose logs nats --tail 10
-    
-    wait_for_screenshot "NATS monitoring UI and correlation service logs"
-    
-    print_success "Step 4 completed: Data correlation validated"
-}
-
-# Step 5: Anomaly detection service
-step5_anomaly_detection() {
-    print_step "Step 5: Anomaly Detection Service Validation"
-    
-    # Check anomaly detection service health
-    check_service_health "Anomaly Detection" "http://localhost:8080/health"
-    
-    # Show service configuration
-    test_endpoint "Anomaly Detection Config" "http://localhost:8080/config"
-    
-    # Check available detectors
-    test_endpoint "Available Detectors" "http://localhost:8080/detectors"
-    
-    # Check metrics endpoint
-    test_endpoint "Service Metrics" "http://localhost:8080/metrics"
-    
-    # Run pipeline validation if available
-    print_info "Running comprehensive pipeline validation..."
-    if [[ -f "scripts/validate_pipeline.sh" ]]; then
-        ./scripts/validate_pipeline.sh 2>/dev/null || print_warning "Pipeline validation script failed"
+    print_info "Checking Benthos processing statistics..."
+    if curl -sf http://localhost:4195/stats > /dev/null; then
+        print_success "Benthos stats endpoint accessible"
+        if command_exists jq; then
+            curl -s http://localhost:4195/stats | jq '{input: .input, output: .output, processor: .processor}' 2>/dev/null || curl -s http://localhost:4195/stats
+        else
+            curl -s http://localhost:4195/stats
+        fi
     else
-        print_warning "Pipeline validation script not found"
+        print_warning "Benthos stats endpoint not responding"
     fi
     
-    # Check VictoriaMetrics data for anomaly detection
-    print_info "Checking VictoriaMetrics data availability for anomaly detection..."
-    test_endpoint "VM Query" "http://localhost:8428/api/v1/query?query=up"
-    
-    # Simulate metrics if needed
-    if [[ -f "scripts/simulate_node_metrics.sh" ]]; then
-        print_info "Simulating node metrics for testing..."
-        ./scripts/simulate_node_metrics.sh 2>/dev/null || print_warning "Metrics simulation failed"
+    print_info "Checking Benthos logs for correlation activity..."
+    if docker compose logs benthos --tail 20 | grep -E "(correlation|incident|anomaly)" > /dev/null; then
+        print_success "Found correlation activity in Benthos logs"
+        docker compose logs benthos --tail 20 | grep -E "(correlation|incident|anomaly)"
+    else
+        print_warning "No correlation activity found in recent Benthos logs"
     fi
     
-    # Check anomaly detection logs
-    print_info "Anomaly detection service logs:"
-    docker compose logs anomaly-detection --tail 30 | grep -E "(anomaly|score|threshold|detection)" || \
-    docker compose logs anomaly-detection --tail 20
+    print_info "Monitoring for incident creation..."
+    echo -e "${BLUE}Expected to see:${NC}"
+    echo "- incident_id, incident_type, incident_severity"
+    echo "- correlation_id, processing_timestamp"
+    echo "- suggested_runbooks array"
     
-    # Wait and check for generated incidents
-    sleep 30
-    print_info "Checking for incidents generated by anomaly detection..."
-    test_endpoint "Generated Incidents" "http://localhost:8081/incidents"
+    if docker compose logs benthos --tail 30 | grep -E "(incident_created|event_type.*incident)" > /dev/null; then
+        print_success "Found incident creation activity!"
+        docker compose logs benthos --tail 30 | grep -E "(incident_created|event_type.*incident)"
+    else
+        print_warning "No recent incident creation activity found"
+    fi
     
-    wait_for_screenshot "Anomaly detection service health response and processing logs"
-    
-    print_success "Step 5 completed: Anomaly detection service validated"
+    wait_for_screenshot "Screenshot of Benthos logs showing incident creation with correlation details"
 }
 
-# Final end-to-end validation
-final_validation() {
-    print_step "Final End-to-End Validation"
+# Summary and completion
+validation_summary() {
+    print_step "VALIDATION SUMMARY"
     
-    # Grafana access
-    print_info "Grafana visualization access:"
-    print_info "URL: http://localhost:3000"
-    print_info "Default login: admin/admin (check .env for custom credentials)"
+    echo -e "${PURPLE}=============================================${NC}"
+    echo -e "${PURPLE} End-to-End Validation Complete${NC}"
+    echo -e "${PURPLE}=============================================${NC}"
+    echo -e "${BLUE}Tracking ID Used: $TRACKING_ID${NC}"
+    echo -e "${PURPLE}=============================================${NC}"
     
-    check_service_health "Grafana" "http://localhost:3000/api/health"
+    echo -e "\n${BLUE}Validation Checklist:${NC}"
+    echo "□ Step 1: Normal message tracked through Vector to ClickHouse"
+    echo "□ Step 2: Message found in ClickHouse logs.raw table with proper transformation"
+    echo "□ Step 3: Anomaly message processed and stored"
+    echo "□ Step 4: NATS message bus showed activity and proper topic subscriptions" 
+    echo "□ Step 5: Benthos processed messages and created incidents"
+    echo "□ All required screenshots captured and documented"
     
-    # Complete service overview
-    print_info "Complete service status overview:"
-    echo ""
-    echo "Core Services:"
-    check_service_health "ClickHouse" "http://localhost:8123/ping" || true
-    check_service_health "VictoriaMetrics" "http://localhost:8428/health" || true  
-    check_service_health "NATS" "http://localhost:8222/healthz" || true
-    check_service_health "Grafana" "http://localhost:3000/api/health" || true
+    echo -e "\n${BLUE}Message Flow Demonstrated:${NC}"
+    echo -e "${GREEN}Normal Path:${NC} Syslog → Vector → ClickHouse → End"
+    echo -e "${YELLOW}Anomaly Path:${NC} Syslog → Vector → ClickHouse → VictoriaMetrics → Anomaly Detection → NATS → Benthos → Incidents"
     
-    echo ""
-    echo "Processing Services:"
-    check_service_health "Anomaly Detection" "http://localhost:8080/health" || true
-    check_service_health "Incident API" "http://localhost:8081/health" || true
+    echo -e "\n${BLUE}Key Data Points Tracked:${NC}"
+    echo "- Unique tracking ID: $TRACKING_ID"
+    echo "- Normal operational message processing"
+    echo "- Anomaly detection and correlation pipeline"
+    echo "- Message transformation at each stage"
+    echo "- Service health and connectivity validation"
     
-    wait_for_screenshot "Grafana login page and main dashboard interface"
-    
-    print_success "Manual validation testing completed!"
-    
-    print_info "Summary of validated components:"
-    echo "✅ 1. Syslog capture from Ubuntu system"
-    echo "✅ 2. Vector log reading service"  
-    echo "✅ 3. ClickHouse log storage and transformation"
-    echo "✅ 4. NATS + Benthos data correlation"
-    echo "✅ 5. Anomaly detection service with ML algorithms"
-    echo "✅ 6. End-to-end pipeline with Grafana visualization"
+    wait_for_confirmation "Review the checklist above and mark completed items. Press Enter to finish."
 }
 
-# Main execution
+# Main execution flow
 main() {
     print_header
     
-    echo "This script will guide you through all 5 validation steps."
-    echo "Screenshots will be requested at key points."
-    echo ""
-    read -p "Press Enter to start the validation process..."
+    check_prerequisites
+    validate_services
     
-    pre_validation_checks
-    step1_syslog_capture
-    step2_log_reading_service  
-    step3_log_storage
-    step4_correlation
-    step5_anomaly_detection
-    final_validation
+    step1_normal_message
+    step2_clickhouse_storage  
+    step3_anomaly_detection
+    step4_nats_messaging
+    step5_benthos_correlation
     
-    echo ""
-    print_success "🎉 All validation steps completed successfully!"
-    print_info "Review the screenshots captured during validation."
-    print_info "Check docs/validation/manual-testing-guide.md for detailed troubleshooting."
+    validation_summary
+    
+    print_success "End-to-End Manual Validation Testing Complete!"
+    echo -e "${BLUE}For troubleshooting, refer to docs/validation/manual-testing-guide.md${NC}"
 }
 
 # Run main function
