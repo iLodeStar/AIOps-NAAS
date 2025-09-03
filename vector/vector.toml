@@ -9,7 +9,7 @@ scrape_interval_secs = 10
 [sources.syslog]
 type = "syslog"
 address = "0.0.0.0:1514"
-mode = "tcp"
+mode = "udp"
 
 [sources.file_logs]
 type = "file"
@@ -107,11 +107,18 @@ request.timeout_secs = 30
 request.retry_attempts = 3
 request.retry_max_duration_secs = 10
 
+# Debug sink for syslog messages to verify reception
+[sinks.syslog_debug]
+type = "console"
+inputs = ["syslog_for_logs"]
+target = "stdout"
+encoding.codec = "json"
+
 # Debug sink to see ONLY transformed data
 [sinks.transform_debug]
 type = "console"
 inputs = ["format_for_clickhouse"]
-target = "stdout"
+target = "stderr"
 encoding.codec = "json"
 
 # Raw metrics debug sink to compare input vs output
@@ -120,11 +127,4 @@ type = "console"
 inputs = ["metrics_for_logs"]
 target = "stderr"
 encoding.codec = "json"
-
-# DISABLED - Additional debug sink for raw metrics to compare
-#[sinks.raw_metrics_debug]
-#type = "console"
-#inputs = ["host_metrics"]
-#target = "stdout"  
-#encoding.codec = "json"
 
