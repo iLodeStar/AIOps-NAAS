@@ -6,10 +6,24 @@ address = "0.0.0.0:8686"
 type = "host_metrics"
 scrape_interval_secs = 10
 
-[sources.syslog]
+# UDP Syslog source (primary)
+[sources.syslog_udp]
 type = "syslog"
 address = "0.0.0.0:1514"
 mode = "udp"
+
+# TCP Syslog source (secondary)
+[sources.syslog_tcp]
+type = "syslog"
+address = "0.0.0.0:1515"
+mode = "tcp"
+
+# SNMP data from network device collector via NATS
+[sources.snmp_nats]
+type = "nats"
+url = "nats://nats:4222"
+subject = "telemetry.network.>"
+connection_name = "vector-snmp-collector"
 
 [sources.file_logs]
 type = "file"
@@ -54,7 +68,7 @@ del(.gauge)
 
 [transforms.syslog_for_logs]
 type = "remap"  
-inputs = ["syslog"]
+inputs = ["syslog_udp", "syslog_tcp"]
 source = '''
 .timestamp = .timestamp
 .level = "INFO"
@@ -92,9 +106,29 @@ source = '''
 .gauge_value = null
 '''
 
+[transforms.snmp_for_logs]
+type = "remap"
+inputs = ["snmp_nats"]
+source = '''
+.timestamp = now()
+.level = "INFO"
+.message = "SNMP: " + to_string(.device_type) + " " + to_string(.device_id) + " - " + to_string(.metric_name) + " = " + to_string(.value)
+.source = "snmp"
+.host = if exists(.device_ip) { .device_ip } else { "unknown" }
+.service = if exists(.device_type) { .device_type } else { "network-device" }
+.raw_log = encode_json(.)
+.labels = if exists(.labels) { .labels } else { {} }
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+'''
+
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed"]
+inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"
@@ -111,6 +145,27 @@ request.retry_max_duration_secs = 10
 [sinks.syslog_debug]
 type = "console"
 inputs = ["syslog_for_logs"]
+target = "stdout"
+encoding.codec = "json"
+
+# Debug sink for raw UDP syslog input
+[sinks.syslog_udp_debug]  
+type = "console"
+inputs = ["syslog_udp"]
+target = "stdout"
+encoding.codec = "json"
+
+# Debug sink for raw TCP syslog input
+[sinks.syslog_tcp_debug]
+type = "console"  
+inputs = ["syslog_tcp"]
+target = "stdout"
+encoding.codec = "json"
+
+# Debug sink for SNMP data
+[sinks.snmp_debug]
+type = "console"
+inputs = ["snmp_for_logs"]
 target = "stdout"
 encoding.codec = "json"
 

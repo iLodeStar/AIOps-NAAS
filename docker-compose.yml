@@ -187,8 +187,9 @@ services:
       - vector_data:/var/lib/vector
     command: ["--config", "/etc/vector/vector.toml"]
     ports:
-      - "8686:8686"
-      - "1514:1514"
+      - "8686:8686"         # HTTP API and metrics
+      - "1514:1514/udp"     # UDP syslog port
+      - "1515:1515/tcp"     # TCP syslog port
     depends_on:
       clickhouse:
         condition: service_healthy
