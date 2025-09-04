@@ -265,6 +265,15 @@ print('v1.0 Confidence Engine loaded successfully!')
 "
 ```
 
+## Project Metrics
+
+**Total Lines of Code:** 51,331 (27,973 code files, 23,358 docs/config)  
+**Core Services:** 12 microservices in Python (19,847 lines)  
+**ML/AI Framework:** Complete self-learning system (3,119 lines)  
+**Testing Coverage:** Comprehensive validation suite (6,146 lines)
+
+📊 **[Detailed Code Analysis](docs/project-metrics/lines-of-code-report.md)**
+
 ## Contributing
 PRs welcome. Please discuss substantial changes via issues first. Follow conventional commits if possible.
 
