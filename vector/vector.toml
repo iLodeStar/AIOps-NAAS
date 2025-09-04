@@ -70,7 +70,8 @@ del(.gauge)
 type = "remap"  
 inputs = ["syslog_udp", "syslog_tcp"]
 source = '''
-.timestamp = .timestamp
+# Ensure timestamp is properly formatted for ClickHouse DateTime64(3)
+.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
 .message = .message
 .source = "syslog"
@@ -90,7 +91,8 @@ source = '''
 type = "remap"
 inputs = ["file_logs"]
 source = '''
-.timestamp = .timestamp
+# Ensure timestamp is properly formatted for ClickHouse DateTime64(3)
+.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
 .level = .level
 .message = .message
 .source = "file"
@@ -110,7 +112,8 @@ source = '''
 type = "remap"
 inputs = ["snmp_nats"]
 source = '''
-.timestamp = now()
+# Set current timestamp and format for ClickHouse DateTime64(3)
+.timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
 .message = "SNMP: " + to_string(.device_type) + " " + to_string(.device_id) + " - " + to_string(.metric_name) + " = " + to_string(.value)
 .source = "snmp"
