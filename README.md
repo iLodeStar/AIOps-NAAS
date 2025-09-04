@@ -41,6 +41,7 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 2. **Configure for your environment**: Copy and customize vendor-specific parameters
 3. Read docs/architecture.md to understand the edge+core design.
 4. Review docs/roadmap.md for implementation status and milestones.
+5. **For manual testing**: See docs/validation/manual-testing-guide.md for comprehensive validation procedures.
 
 ## Configuration
 **Vendor Integration**: The platform supports configurable integration with various satellite VSAT vendors, network protocols, and external systems:
@@ -166,6 +167,23 @@ python3 test_v04_integration.py
 - 📊 **Fleet Reporting**: Multi-ship aggregation and centralized dashboards
 - 📈 **Capacity Forecasting**: ML-based traffic prediction and resource planning
 - ⚖️ **Cross-Ship Benchmarking**: Performance comparison and optimization recommendations
+
+### Manual Testing & Validation
+
+**For Test Engineers**: Comprehensive validation procedures are provided for manual testing of the complete data flow:
+
+```bash
+# Quick validation guide
+./scripts/manual_validation_test.sh
+
+# Troubleshooting diagnostics
+./scripts/troubleshoot_validation.sh
+```
+
+**Documentation:**
+- **Complete Guide**: [docs/validation/manual-testing-guide.md](docs/validation/manual-testing-guide.md) - Step-by-step validation from syslog capture to anomaly detection
+- **Quick Reference**: [docs/validation/quick-reference-card.md](docs/validation/quick-reference-card.md) - Essential commands and endpoints
+- **Troubleshooting**: Built-in diagnostic tools for common issues
 
 ### Quick Links to UIs and APIs
 
