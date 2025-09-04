@@ -29,6 +29,7 @@ import uvicorn
 
 import requests
 from nats.aio.client import Client as NATS
+from clickhouse_driver import Client as ClickHouseClient
 
 # Configure logging
 logging.basicConfig(
@@ -228,14 +229,144 @@ class VictoriaMetricsClient:
         except:
             return False
 
+class ClickHouseClient:
+    """ClickHouse client for historical data analysis"""
+    
+    def __init__(self):
+        self.client = ClickHouseClient(host='clickhouse', port=9000, user='default', password='clickhouse123')
+        
+    def get_historical_baselines(self, metric_name: str, days: int = 7) -> Dict[str, float]:
+        """Get historical baseline metrics for comparison"""
+        try:
+            query = f"""
+            SELECT 
+                AVG(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as avg_value,
+                quantile(0.5)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as median_value,
+                quantile(0.95)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as p95_value,
+                quantile(0.99)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as p99_value,
+                COUNT(*) as sample_count
+            FROM logs.raw 
+            WHERE source = 'host_metrics'
+              AND message LIKE '%{metric_name}%'
+              AND timestamp >= now() - INTERVAL {days} DAY
+              AND timestamp < now() - INTERVAL 1 HOUR
+            """
+            
+            result = self.client.execute(query)
+            if result and result[0][4] > 0:  # sample_count > 0
+                return {
+                    'avg': float(result[0][0]) if result[0][0] is not None else 0.0,
+                    'median': float(result[0][1]) if result[0][1] is not None else 0.0,
+                    'p95': float(result[0][2]) if result[0][2] is not None else 0.0,
+                    'p99': float(result[0][3]) if result[0][3] is not None else 0.0,
+                    'sample_count': int(result[0][4])
+                }
+            return {}
+            
+        except Exception as e:
+            logger.error(f"Error getting historical baselines for {metric_name}: {e}")
+            return {}
+    
+    def get_correlation_patterns(self, current_anomaly: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find historical patterns that correlate with current anomaly"""
+        try:
+            # Look for similar anomaly patterns in the past
+            query = f"""
+            SELECT 
+                message,
+                host,
+                service,
+                timestamp,
+                COUNT(*) OVER (PARTITION BY toStartOfHour(timestamp)) as hourly_count
+            FROM logs.raw 
+            WHERE source IN ('syslog', 'host_metrics', 'snmp')
+              AND (
+                message ILIKE '%error%' OR 
+                message ILIKE '%critical%' OR 
+                message ILIKE '%fail%' OR
+                (source = 'host_metrics' AND message LIKE '%{current_anomaly.get("metric_name", "")}%')
+              )
+              AND timestamp >= now() - INTERVAL 30 DAY
+              AND timestamp <= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp DESC
+            LIMIT 100
+            """
+            
+            results = self.client.execute(query)
+            patterns = []
+            
+            for row in results:
+                patterns.append({
+                    'message': row[0],
+                    'host': row[1], 
+                    'service': row[2],
+                    'timestamp': row[3].isoformat() if row[3] else None,
+                    'hourly_count': row[4]
+                })
+                
+            return patterns
+            
+        except Exception as e:
+            logger.error(f"Error getting correlation patterns: {e}")
+            return []
+    
+    def get_incident_resolution_history(self, anomaly_type: str) -> List[Dict[str, Any]]:
+        """Get historical incident resolutions for similar anomalies"""
+        try:
+            query = f"""
+            SELECT 
+                incident_id,
+                incident_type,
+                description,
+                resolution_actions,
+                resolution_time_minutes,
+                success_rate,
+                created_at
+            FROM incidents 
+            WHERE incident_type ILIKE '%{anomaly_type}%'
+              AND status = 'resolved'
+              AND created_at >= now() - INTERVAL 90 DAY
+            ORDER BY created_at DESC
+            LIMIT 50
+            """
+            
+            results = self.client.execute(query)
+            resolutions = []
+            
+            for row in results:
+                resolutions.append({
+                    'incident_id': row[0],
+                    'incident_type': row[1],
+                    'description': row[2],
+                    'resolution_actions': row[3],
+                    'resolution_time_minutes': row[4],
+                    'success_rate': row[5],
+                    'created_at': row[6].isoformat() if row[6] else None
+                })
+                
+            return resolutions
+            
+        except Exception as e:
+            logger.error(f"Error getting incident resolution history: {e}")
+            return []
+    
+    def health_check(self) -> bool:
+        """Check ClickHouse connectivity"""
+        try:
+            self.client.execute("SELECT 1")
+            return True
+        except:
+            return False
+
 class AnomalyDetectionService:
-    """Main anomaly detection service"""
+    """Main anomaly detection service with historical analysis"""
     
     def __init__(self):
         self.vm_client = VictoriaMetricsClient()
+        self.clickhouse_client = ClickHouseClient()
         self.detectors = SimpleAnomalyDetectors()
         self.nats_client = None
-        self.health_status = {"healthy": False, "vm_connected": False, "nats_connected": False}
+        self.health_status = {"healthy": False, "vm_connected": False, "nats_connected": False, "clickhouse_connected": False}
         
         # Metric queries to monitor
         self.metric_queries = [
@@ -328,7 +459,7 @@ class AnomalyDetectionService:
             logger.error(f"Error publishing anomaly event: {e}")
     
     async def process_metrics(self):
-        """Process metrics and detect anomalies"""
+        """Process metrics with historical baseline analysis"""
         logger.info("Processing metrics for anomaly detection...")
         
         for metric_query in self.metric_queries:
@@ -336,53 +467,88 @@ class AnomalyDetectionService:
                 continue
                 
             try:
+                # Get current metrics
                 results = self.vm_client.query_instant(metric_query.query)
+                
+                # Get historical baselines for comparison
+                baselines = self.clickhouse_client.get_historical_baselines(metric_query.name)
                 
                 for result in results:
                     value = result['value']
                     metric_labels = result['metric']
                     
-                    # Get anomaly scores from all detectors
+                    # Enhanced anomaly detection with historical context
                     scores = self.detectors.update_and_detect(metric_query.name, value)
                     
-                    # Check if any detector found an anomaly above threshold
-                    for detector_name, score in scores.items():
-                        if score > metric_query.threshold:
-                            event = AnomalyEvent(
-                                timestamp=datetime.now(),
-                                metric_name=metric_query.name,
-                                metric_value=value,
-                                anomaly_score=score,
-                                anomaly_type="statistical",
-                                detector_name=detector_name,
-                                threshold=metric_query.threshold,
-                                metadata={
-                                    "query": metric_query.query,
-                                    "vm_timestamp": result['timestamp']
-                                },
-                                labels=metric_labels
-                            )
-                            
-                            await self.publish_anomaly(event)
-                            
+                    # Historical baseline comparison
+                    historical_anomaly_score = 0.0
+                    if baselines and 'p95' in baselines:
+                        if value > baselines['p95']:
+                            historical_anomaly_score = min((value - baselines['p95']) / (baselines['p99'] - baselines['p95'] + 0.001), 1.0)
+                    
+                    # Combine statistical and historical scores
+                    max_statistical_score = max(scores.values()) if scores else 0.0
+                    combined_score = max(max_statistical_score, historical_anomaly_score)
+                    
+                    # Check if any detection method found an anomaly above threshold
+                    if combined_score > metric_query.threshold:
+                        # Get correlation patterns and resolution history
+                        correlation_patterns = self.clickhouse_client.get_correlation_patterns({
+                            'metric_name': metric_query.name,
+                            'value': value,
+                            'timestamp': datetime.now()
+                        })
+                        
+                        resolution_history = self.clickhouse_client.get_incident_resolution_history(metric_query.name)
+                        
+                        # Create enhanced anomaly event
+                        event = AnomalyEvent(
+                            timestamp=datetime.now(),
+                            metric_name=metric_query.name,
+                            metric_value=value,
+                            anomaly_score=combined_score,
+                            anomaly_type="statistical_with_baseline",
+                            detector_name="enhanced_detector",
+                            threshold=metric_query.threshold,
+                            metadata={
+                                "query": metric_query.query,
+                                "vm_timestamp": result['timestamp'],
+                                "statistical_scores": scores,
+                                "historical_baselines": baselines,
+                                "historical_anomaly_score": historical_anomaly_score,
+                                "combined_score": combined_score,
+                                "correlation_patterns_count": len(correlation_patterns),
+                                "resolution_history_count": len(resolution_history),
+                                "similar_incidents": resolution_history[:3]  # Top 3 similar incidents
+                            },
+                            labels=metric_labels
+                        )
+                        
+                        await self.publish_anomaly(event)
+                        logger.info(f"Published enhanced anomaly: {metric_query.name} = {combined_score:.3f} (statistical: {max_statistical_score:.3f}, historical: {historical_anomaly_score:.3f})")
+                        
             except Exception as e:
                 logger.error(f"Error processing metric {metric_query.name}: {e}")
     
     async def health_check_loop(self):
-        """Periodic health check loop"""
+        """Periodic health check loop with ClickHouse"""
         while True:
             try:
                 vm_healthy = self.vm_client.health_check()
+                clickhouse_healthy = self.clickhouse_client.health_check()
                 nats_healthy = self.nats_client and not self.nats_client.is_closed
                 
                 self.health_status["vm_connected"] = vm_healthy
+                self.health_status["clickhouse_connected"] = clickhouse_healthy
                 self.health_status["nats_connected"] = nats_healthy
-                self.health_status["healthy"] = vm_healthy and nats_healthy
+                self.health_status["healthy"] = vm_healthy and clickhouse_healthy and nats_healthy
                 
-                logger.info(f"Health check - VM: {vm_healthy}, NATS: {nats_healthy}")
+                logger.info(f"Health check - VM: {vm_healthy}, ClickHouse: {clickhouse_healthy}, NATS: {nats_healthy}")
                 
                 if not vm_healthy:
                     logger.warning("VictoriaMetrics is not healthy")
+                if not clickhouse_healthy:
+                    logger.warning("ClickHouse is not healthy")
                 if not nats_healthy:
                     logger.warning("NATS is not healthy")
                     

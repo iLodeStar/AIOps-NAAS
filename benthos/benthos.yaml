@@ -1,16 +1,16 @@
-# Benthos configuration for AIOps NAAS v0.2 Event Correlation
-# This configuration implements rule-based correlation, deduplication, and suppression
+# Benthos configuration for AIOps NAAS v0.4 Enhanced Cross-Source Correlation
+# This configuration implements comprehensive rule-based correlation across logs, metrics, SNMP data, and applications
 
 http:
   enabled: true
   address: "0.0.0.0:4195"
   debug_endpoints: true
 
-# Input: Consume anomaly events from NATS (both regular and enriched)
+# Input: Consume events from multiple sources for comprehensive correlation
 input:
   broker:
     inputs:
-      # Original anomaly events from basic anomaly detection
+      # Anomaly events from basic anomaly detection
       - nats:
           urls: ["nats://nats:4222"]
           subject: "anomaly.detected"
@@ -21,85 +21,194 @@ input:
           urls: ["nats://nats:4222"]
           subject: "anomaly.detected.enriched"
           queue: "correlation_processor_enriched"
+          
+      # Application log anomalies from application-log-collector
+      - nats:
+          urls: ["nats://nats:4222"]
+          subject: "logs.anomalous"
+          queue: "correlation_processor_app_logs"
+          
+      # SNMP network anomalies
+      - nats:
+          urls: ["nats://nats:4222"]
+          subject: "telemetry.network.anomaly"
+          queue: "correlation_processor_snmp"
 
-# Pipeline for event processing and correlation
+# Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
   processors:
-    # Parse and enrich anomaly events (both regular and enriched)
+    # Parse and enrich events from all sources
     - mapping: |
         root.correlation_id = uuid_v4()
         root.processing_timestamp = now()
         
-        # Extract ship and service information from original event
+        # Identify event source and type
+        root.event_source = if this.anomaly_type == "log_pattern" {
+          "application_logs"
+        } else if this.detector_name.contains("network") || this.labels.device_type.type() == "string" {
+          "snmp_network"
+        } else if this.correlation_level == "level_1_enriched" {
+          "enriched_metrics"
+        } else {
+          "basic_metrics"
+        }
+        
+        # Extract contextual information
         root.ship_id = if this.labels.instance != null {
           this.labels.instance
+        } else if this.labels.ship_id != null {
+          this.labels.ship_id
+        } else if this.host != null {
+          this.host
         } else {
           "ship-01"
         }
         
         root.service = if this.labels.job != null {
           this.labels.job  
+        } else if this.service != null {
+          this.service
+        } else if this.application != null {
+          this.application
         } else {
           "unknown"
         }
         
-        # Handle both regular and enriched anomalies
+        # Standardize anomaly scoring across sources
+        root.anomaly_score = if exists(this.anomaly_score) {
+          this.anomaly_score
+        } else if this.severity == "critical" {
+          0.9
+        } else if this.severity == "high" {
+          0.8
+        } else if this.severity == "medium" {
+          0.6
+        } else {
+          0.4
+        }
+        
+        # Handle different event types
         root.is_enriched = if this.correlation_level == "level_1_enriched" {
           true
         } else {
           false
         }
         
-        # Preserve enrichment context if available
+        # Preserve contextual information
         root.enrichment_context = this.enrichment_context || {}
         root.maritime_context = this.maritime_context || {}
         root.operational_status = this.operational_status || "normal"
         
-        # Add severity based on anomaly score and operational status
+        # Add application-specific context
+        if this.event_source == "application_logs" {
+          root.app_context = {
+            "logger_name": this.logger_name,
+            "trace_id": this.trace_id,
+            "span_id": this.span_id,
+            "thread": this.thread,
+            "application": this.application
+          }
+        }
+        
+        # Add network-specific context
+        if this.event_source == "snmp_network" {
+          root.network_context = {
+            "device_type": this.labels.device_type,
+            "device_ip": this.host,
+            "interface": this.labels.interface,
+            "metric_name": this.metric_name
+          }
+        }
+        
+        # Enhanced severity calculation
         root.severity = if this.anomaly_score > 0.9 {
           "critical"
         } else if this.anomaly_score > 0.7 {
           "warning"  
         } else if this.operational_status == "weather_impacted" || this.operational_status == "system_overloaded" {
-          "warning"  # Bump severity for problematic operational states
+          "warning"
+        } else if this.event_source == "application_logs" && this.level == "ERROR" {
+          "warning"
         } else {
           "info"
         }
               
-    # Deduplication based on metric name, ship, and time window
+    # Enhanced deduplication based on source, context, and time window
     - dedupe:
         cache: "dedupe_cache"
-        key: "${! json(\"metric_name\") + json(\"ship_id\") }"
+        key: "${! json(\"event_source\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"service\") }"
         drop_on_err: false
         
-    # Store event for correlation
+    # Store events for comprehensive cross-source correlation
     - cache:
         resource: "correlation_cache"  
         operator: "set"
-        key: "${! json(\"metric_name\") + \"_\" + json(\"ship_id\") }"
+        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + json(\"metric_name\") }"
         value: "${! content() }"
-        ttl: "300s"  # 5 minute correlation window
+        ttl: "600s"  # 10 minute correlation window for comprehensive analysis
         
-    # Fetch related metrics for correlation
+    # Store by time window for temporal correlation
+    - cache:
+        resource: "temporal_cache"
+        operator: "set"
+        key: "${! json(\"ship_id\") + \"_\" + now().truncate(\"5m\").format(timestamp_unix) }"
+        value: "${! content() }"
+        ttl: "900s"  # 15 minute temporal correlation window
+        
+    # Fetch related events for cross-source correlation
     - cache:
         resource: "correlation_cache"
         operator: "get"  
-        key: "${! if json(\"metric_name\") == \"cpu_usage\" { \"memory_usage_\" + json(\"ship_id\") } else if json(\"metric_name\") == \"memory_usage\" { \"cpu_usage_\" + json(\"ship_id\") } else { \"\" } }"
+        key: "${! 
+          # Look for related CPU/memory correlation
+          if json(\"metric_name\") == \"cpu_usage\" { 
+            json(\"ship_id\") + \"_basic_metrics_memory_usage\"
+          } else if json(\"metric_name\") == \"memory_usage\" { 
+            json(\"ship_id\") + \"_basic_metrics_cpu_usage\"
+          # Look for application errors during system anomalies
+          } else if json(\"event_source\") == \"basic_metrics\" {
+            json(\"ship_id\") + \"_application_logs_log_anomaly\"
+          # Look for network issues during application errors
+          } else if json(\"event_source\") == \"application_logs\" {
+            json(\"ship_id\") + \"_snmp_network_\"
+          } else {
+            \"\"
+          }
+        }"
         
-    # Create correlated incident (enhanced for enriched anomalies)
+    # Fetch secondary correlation (network during system issues)
+    - cache:
+        resource: "correlation_cache"
+        operator: "get"
+        key: "${! 
+          if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\").contains(\"cpu\") {
+            json(\"ship_id\") + \"_snmp_network_interface_utilization\"
+          } else {
+            \"\"
+          }
+        }"
+        
+    # Create comprehensive correlated incidents
     - mapping: |
         root.incident_type = "single_anomaly"
         
-        # Check if we have a correlated metric
+        # Parse related event from cache
         let related = if meta("cache_result").type() == "string" {
           meta("cache_result").parse_json() 
         } else {
           null
         }
         
-        # Enhanced correlation for enriched anomalies
+        # Parse secondary correlation
+        let secondary = if meta("cache_result_1").type() == "string" {
+          meta("cache_result_1").parse_json()
+        } else {
+          null
+        }
+        
+        # Comprehensive cross-source incident classification
         if this.is_enriched && this.operational_status != "normal" {
-          # Create enriched operational incident
+          # Enhanced operational incidents
           root.incident_type = if this.operational_status == "weather_impacted" {
             "weather_degradation"
           } else if this.operational_status == "system_overloaded" {
@@ -109,11 +218,35 @@ pipeline:
           } else {
             "operational_anomaly"
           }
+          
+        } else if this.event_source == "application_logs" && related != null && related.event_source == "basic_metrics" {
+          # Application errors correlated with system metrics
+          if related.metric_name.contains("cpu") || related.metric_name.contains("memory") {
+            root.incident_type = "application_system_correlation"
+          } else {
+            root.incident_type = "application_infrastructure_issue"
+          }
+          
+        } else if this.event_source == "basic_metrics" && related != null && related.event_source == "application_logs" {
+          # System metrics correlated with application errors
+          root.incident_type = "system_application_correlation"
+          
+        } else if this.event_source == "snmp_network" && (related != null || secondary != null) {
+          # Network issues correlated with other systems
+          if related != null && related.event_source == "application_logs" {
+            root.incident_type = "network_application_correlation"
+          } else if secondary != null && secondary.event_source == "basic_metrics" {
+            root.incident_type = "network_system_correlation"
+          } else {
+            root.incident_type = "network_anomaly"
+          }
+          
         } else if related != null && 
           ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
            (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
           # Traditional CPU/memory correlation
           root.incident_type = "resource_pressure"
+          
         } else if this.is_enriched && this.enrichment_context != {} {
           # Multi-source correlation for enriched data
           if (this.metric_name.contains("satellite") && this.enrichment_context.weather_impact != null) {
@@ -123,29 +256,45 @@ pipeline:
           } else {
             root.incident_type = "enriched_anomaly"
           }
+          
         } else {
           root.incident_type = "single_anomaly"
         }
         
-        # Add correlation details with enrichment context
-        root.correlated_events = if related != null {
-          [this, related]  
-        } else {
-          [this]
+        # Build comprehensive correlation details
+        let all_events = [this]
+        if related != null {
+          all_events = all_events.append(related)
+        }
+        if secondary != null {
+          all_events = all_events.append(secondary)
         }
         
-        # Enhanced incident severity calculation
-        root.incident_severity = if this.severity == "critical" || (related != null && related.severity == "critical") {
-          "critical"
-        } else if this.severity == "warning" || (related != null && related.severity == "warning") {
-          "warning"
-        } else if this.is_enriched && (this.operational_status == "weather_impacted" || this.operational_status == "system_overloaded") {
-          "warning"  # Boost severity for enriched operational issues
-        } else {
-          "info"
+        root.correlated_events = all_events
+        
+        # Enhanced severity calculation considering all correlated events
+        let max_severity = this.severity
+        if related != null && related.severity.priority() > max_severity.priority() {
+          max_severity = related.severity
+        }
+        if secondary != null && secondary.severity.priority() > max_severity.priority() {
+          max_severity = secondary.severity
         }
         
-        # Add enrichment metadata to incident
+        root.incident_severity = max_severity
+        
+        # Comprehensive correlation confidence
+        root.correlation_confidence = if len(all_events) > 2 {
+          0.95  # High confidence with 3+ correlated events
+        } else if len(all_events) == 2 {
+          0.85  # Good confidence with 2 correlated events
+        } else if this.is_enriched {
+          0.75  # Medium confidence for enriched single events
+        } else {
+          0.60  # Lower confidence for single basic events
+        }
+        
+        # Add comprehensive metadata
         root.enrichment_metadata = {
           "has_enrichment": this.is_enriched || false,
           "enrichment_context": this.enrichment_context || {},

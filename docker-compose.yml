@@ -593,6 +593,52 @@ services:
       retries: 3
       start_period: 60s
 
+  # Data Flow Visualization Service
+  data-flow-visualization:
+    build: ./services/data-flow-visualization
+    container_name: aiops-data-flow-visualization
+    ports:
+      - "8089:8089"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=INFO
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Application Log Collector Service
+  application-log-collector:
+    build: ./services/application-log-collector
+    container_name: aiops-application-log-collector
+    ports:
+      - "8090:8090"  # HTTP log ingestion
+      - "5140:5140"  # TCP log ingestion
+    environment:
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=INFO
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   clickhouse_data:
   vm_data:

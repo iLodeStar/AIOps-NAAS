@@ -25,6 +25,13 @@ url = "nats://nats:4222"
 subject = "telemetry.network.>"
 connection_name = "vector-snmp-collector"
 
+# Application logs from application-log-collector via NATS
+[sources.app_logs_nats]
+type = "nats"
+url = "nats://nats:4222"
+subject = "logs.applications"
+connection_name = "vector-app-logs"
+
 [sources.file_logs]
 type = "file"
 include = ["/var/log/sample/*.log"]
@@ -129,15 +136,47 @@ source = '''
 .gauge_value = null
 '''
 
-# Enhanced transform to detect and filter anomalous syslog messages
+[transforms.app_logs_for_logs]
+type = "remap"
+inputs = ["app_logs_nats"]
+source = '''
+# Use provided timestamp or current timestamp and format for ClickHouse DateTime64(3)
+.timestamp = if exists(.timestamp) { 
+  format_timestamp!(parse_timestamp!(.timestamp, "%Y-%m-%dT%H:%M:%S%.fZ"), "%Y-%m-%d %H:%M:%S%.3f")
+} else { 
+  format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+}
+.level = if exists(.level) { .level } else { "INFO" }
+.message = .message
+.source = "application"
+.host = if exists(.host) { .host } else { "unknown" }
+.service = if exists(.service) { .service } else { if exists(.application) { .application } else { "app-service" } }
+.raw_log = encode_json(.)
+.labels = if exists(.metadata) { .metadata } else { {} }
+.name = ""
+.namespace = ""
+.tags = {}
+.kind = ""
+.counter_value = null
+.gauge_value = null
+
+# Add application-specific fields to labels
+if exists(.application) { .labels.application = .application }
+if exists(.logger_name) { .labels.logger_name = .logger_name }
+if exists(.trace_id) { .labels.trace_id = .trace_id }
+if exists(.span_id) { .labels.span_id = .span_id }
+if exists(.thread) { .labels.thread = .thread }
+'''
+
+# Enhanced transform to detect and filter anomalous syslog and application logs
 [transforms.anomalous_logs_filter]
 type = "filter"
-inputs = ["syslog_for_logs"]
+inputs = ["syslog_for_logs", "app_logs_for_logs"]
 condition = '''
   (
     exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
     exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
-    match_regex!(.message, r"(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency)")
+    match_regex!(.message, r"(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency|exception|stack.*trace)")
   )
 '''
 
@@ -186,7 +225,7 @@ source = '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs"]
+inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
 endpoint = "http://clickhouse:8123"
 table = "raw"
 database = "logs"

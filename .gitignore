@@ -110,3 +110,8 @@ coverage.xml
 junit-*.xml
 .pytest_cache/
 tests/v1.0/test_v1_components.py.bak
+
+# Temporary development files
+/tmp/
+.tmp/
+*.tmp

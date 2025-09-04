@@ -188,36 +188,141 @@ class IncidentTranslator:
         return formatted
     
     async def _get_historical_context(self, incident_type: str, ship_id: str) -> str:
-        """Query ClickHouse for historical incident patterns"""
+        """Query ClickHouse for enhanced historical incident patterns with predictive analysis"""
         try:
             if not self.clickhouse_client:
                 return "No historical data available"
                 
+            # Get comprehensive historical analysis
             query = """
                 SELECT 
                     COUNT(*) as occurrences,
                     AVG(resolution_time_minutes) as avg_resolution,
-                    groupArray(resolution_action) as successful_actions
+                    AVG(confidence) as avg_confidence,
+                    groupArray(resolution_action) as successful_actions,
+                    groupArray(root_cause) as common_causes,
+                    COUNT(CASE WHEN status = 'resolved' THEN 1 END) as successful_resolutions,
+                    COUNT(CASE WHEN status = 'escalated' THEN 1 END) as escalated_cases,
+                    groupArray(toString(toStartOfDay(created_at))) as occurrence_dates,
+                    groupArray(severity) as severity_history
                 FROM incidents 
                 WHERE incident_type = %s 
                   AND ship_id = %s 
-                  AND created_at > now() - INTERVAL 30 DAY
-                  AND status = 'resolved'
+                  AND created_at > now() - INTERVAL 90 DAY
             """
             
             result = self.clickhouse_client.execute(query, [incident_type, ship_id])
             
             if result and result[0][0] > 0:
-                occurrences, avg_resolution, actions = result[0]
-                return f"This has happened {occurrences} times in the past month. " \
-                       f"It typically takes {int(avg_resolution)} minutes to resolve. " \
-                       f"Common successful fixes: {', '.join(actions[:3])}."
+                (occurrences, avg_resolution, avg_confidence, actions, 
+                 causes, successful, escalated, dates, severities) = result[0]
+                
+                # Calculate success rate and patterns
+                success_rate = (successful / occurrences * 100) if occurrences > 0 else 0
+                escalation_rate = (escalated / occurrences * 100) if occurrences > 0 else 0
+                
+                # Analyze temporal patterns
+                time_pattern = self._analyze_temporal_patterns(dates)
+                
+                # Build comprehensive context
+                context = f"This has happened {occurrences} times in the past 90 days"
+                
+                if avg_resolution:
+                    context += f", typically taking {int(avg_resolution)} minutes to resolve"
+                
+                context += f". Success rate: {success_rate:.0f}%"
+                
+                if escalated > 0:
+                    context += f" (escalated {escalation_rate:.0f}% of the time)"
+                
+                if len(set(actions)) > 0:
+                    unique_actions = list(set(actions))[:3]
+                    context += f". Most effective fixes: {', '.join(unique_actions)}"
+                
+                if len(set(causes)) > 0:
+                    unique_causes = list(set(causes))[:2]
+                    context += f". Common causes: {', '.join(unique_causes)}"
+                
+                if time_pattern:
+                    context += f". Pattern: {time_pattern}"
+                
+                return context + "."
             else:
-                return "This is the first time this type of issue has been detected on your ship."
+                # Check for similar incident types
+                similar_context = await self._get_similar_incident_context(incident_type, ship_id)
+                return similar_context or "This is the first time this type of issue has been detected on your ship."
                 
         except Exception as e:
             logger.error(f"Error getting historical context: {e}")
             return "Historical data temporarily unavailable"
+    
+    def _analyze_temporal_patterns(self, dates: List[str]) -> str:
+        """Analyze temporal patterns in incident occurrences"""
+        try:
+            if len(dates) < 3:
+                return "insufficient data for pattern analysis"
+            
+            # Convert to datetime objects and analyze
+            from datetime import datetime
+            dt_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
+            dt_dates.sort()
+            
+            # Check for recent clustering
+            recent_count = sum(1 for date in dt_dates if (datetime.now() - date).days <= 7)
+            
+            if recent_count >= len(dt_dates) * 0.6:
+                return "issues clustering recently (may indicate deteriorating condition)"
+            
+            # Check for regular intervals
+            if len(dt_dates) >= 3:
+                gaps = [(dt_dates[i+1] - dt_dates[i]).days for i in range(len(dt_dates)-1)]
+                avg_gap = sum(gaps) / len(gaps) if gaps else 0
+                
+                if 20 <= avg_gap <= 35:
+                    return f"occurs roughly monthly (every {avg_gap:.0f} days) - may be maintenance-related"
+                elif 5 <= avg_gap <= 10:
+                    return f"occurs weekly (every {avg_gap:.0f} days) - check operational patterns"
+            
+            return "occurs irregularly"
+            
+        except Exception as e:
+            logger.error(f"Error analyzing temporal patterns: {e}")
+            return "pattern analysis unavailable"
+    
+    async def _get_similar_incident_context(self, incident_type: str, ship_id: str) -> Optional[str]:
+        """Get context from similar incident types"""
+        try:
+            # Extract base type for similarity matching
+            base_type = incident_type.split('_')[0]
+            
+            query = """
+                SELECT 
+                    incident_type,
+                    COUNT(*) as count,
+                    AVG(resolution_time_minutes) as avg_resolution
+                FROM incidents 
+                WHERE incident_type LIKE %s 
+                  AND ship_id = %s 
+                  AND created_at > now() - INTERVAL 90 DAY
+                  AND status = 'resolved'
+                GROUP BY incident_type
+                ORDER BY count DESC
+                LIMIT 3
+            """
+            
+            result = self.clickhouse_client.execute(query, [f"%{base_type}%", ship_id])
+            
+            if result:
+                similar_info = []
+                for row in result:
+                    similar_info.append(f"{row[1]}x {row[0]} (avg: {int(row[2])}min)")
+                return f"Similar issues found: {'; '.join(similar_info)}"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting similar incident context: {e}")
+            return None
     
     async def _generate_predictive_insights(self, incident_data: Dict[str, Any], historical_context: str) -> Dict[str, str]:
         """Generate predictive insights based on incident data and history"""
