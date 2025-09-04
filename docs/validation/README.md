@@ -4,28 +4,52 @@ This directory contains comprehensive testing and validation documentation for t
 
 ## Documentation Overview
 
+### 🆕 [Ubuntu Manual Testing Guide](ubuntu-manual-testing-guide.md) ⭐ **NEW**
+**Simple 5-Step Validation for Ubuntu VMs**
+
+**Perfect for Issue #42 Requirements:**
+- Simplified validation in layman terms
+- Ubuntu VM with Docker focus
+- Clear step-by-step commands with expected outputs
+- Concrete examples and troubleshooting
+- Addresses the 5 specific validation steps requested
+
+**Target Audience**: Test engineers, Ubuntu users, Docker beginners  
+**Use Case**: Quick validation, troubleshooting, learning the data flow
+
 ### 📋 [Manual Testing Guide](manual-testing-guide.md)
-**Primary Resource for Test Engineers**
+**Comprehensive Technical Resource**
 
-Complete step-by-step manual validation guide covering:
+Complete advanced validation guide covering:
 - Pre-validation Docker environment setup
-- 5-step validation process from syslog capture to anomaly detection  
+- Detailed service-by-service validation 
 - Screenshot requirements and UI navigation
-- Service-by-service validation with practical commands
-- Troubleshooting procedures and error resolution
+- Advanced troubleshooting procedures
+- Production-grade testing scenarios
 
-**Target Audience**: Test engineers, QA teams, system validators  
-**Use Case**: Comprehensive system validation, bug investigation, acceptance testing
+**Target Audience**: Senior test engineers, QA teams, system validators  
+**Use Case**: Comprehensive system validation, complex bug investigation
+
+### ⚡ [5-Step Quick Reference](5-step-quick-reference.md) ⭐ **NEW**
+**Ultra-Fast Validation Commands**
+
+**Compact card for the 5 validation steps:**
+- Copy-paste ready commands
+- Expected outputs for each step
+- Quick troubleshooting table
+- Complete validation in 5-10 minutes
+
+**Target Audience**: All users, quick validation  
+**Use Case**: Daily health checks, fast debugging
 
 ### 🚀 [Quick Reference Card](quick-reference-card.md)
 **Essential Commands and Endpoints**
 
-Compact reference containing:
-- Quick start commands
-- 5-step validation checklist
-- Essential service endpoints and health checks
+Comprehensive reference containing:
+- All service endpoints and health checks
 - Emergency troubleshooting commands
-- Expected validation results
+- Configuration validation steps
+- Performance monitoring commands
 
 **Target Audience**: Experienced users, DevOps teams  
 **Use Case**: Daily operations, quick health checks, incident response
