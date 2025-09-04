@@ -129,6 +129,61 @@ source = '''
 .gauge_value = null
 '''
 
+# Enhanced transform to detect and filter anomalous syslog messages
+[transforms.anomalous_logs_filter]
+type = "filter"
+inputs = ["syslog_for_logs"]
+condition = '''
+  (
+    exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
+    exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
+    match_regex!(.message, r"(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency)")
+  )
+'''
+
+# Transform anomalous logs for NATS publication
+[transforms.anomalous_logs_for_nats]
+type = "remap"
+inputs = ["anomalous_logs_filter"]
+source = '''
+# Preserve original fields and add anomaly metadata
+.anomaly_type = "log_pattern"
+.anomaly_detected_at = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+.anomaly_source = "vector_log_filter"
+
+# Extract tracking ID if present
+.tracking_id = if match_regex(.message, r"(TEST-\d{8}-\d{6}-[a-f0-9]+|E2E-\d{8}-\d{6}-[a-f0-9]+)") {
+  string!(get_regex_groups(.message, r"(TEST-\d{8}-\d{6}-[a-f0-9]+|E2E-\d{8}-\d{6}-[a-f0-9]+)")[0])
+} else {
+  null
+}
+
+# Severity mapping for consistency
+.anomaly_severity = if exists(.severity) {
+  if (.severity == "emerg" || .severity == "alert" || .severity == "crit") {
+    "critical"
+  } else if .severity == "err" {
+    "high"  
+  } else if .severity == "warning" {
+    "medium"
+  } else {
+    "low"
+  }
+} else if exists(.level) {
+  if (.level == "FATAL" || .level == "CRITICAL") {
+    "critical"
+  } else if .level == "ERROR" {
+    "high"
+  } else if .level == "WARN" {
+    "medium"
+  } else {
+    "low"
+  }
+} else {
+  "medium"
+}
+'''
+
 [sinks.clickhouse]
 type = "clickhouse"
 inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs"]
@@ -148,6 +203,14 @@ request.retry_max_duration_secs = 10
 strategy = "basic"
 user = "${CLICKHOUSE_USER:-default}"
 password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
+
+# Send anomalous logs to NATS for real-time anomaly detection
+[sinks.anomalous_logs_nats]
+type = "nats"
+inputs = ["anomalous_logs_for_nats"]
+url = "nats://nats:4222"
+subject = "logs.anomalous"
+encoding.codec = "json"
 
 # Debug sink for syslog messages to verify reception
 [sinks.syslog_debug]

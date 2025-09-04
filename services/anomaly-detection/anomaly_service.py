@@ -18,6 +18,7 @@ import asyncio
 import logging
 import json
 import time
+import re
 import statistics
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -261,14 +262,56 @@ class AnomalyDetectionService:
             self.nats_client = NATS()
             await self.nats_client.connect("nats://nats:4222")
             
+            # Subscribe to anomalous logs from Vector
+            await self.nats_client.subscribe("logs.anomalous", cb=self.process_anomalous_log)
+            
             # Simple connection - no JetStream for now to avoid complexity
-            logger.info("Connected to NATS")
+            logger.info("Connected to NATS and subscribed to anomalous logs")
             self.health_status["nats_connected"] = True
                 
         except Exception as e:
             logger.error(f"Failed to connect to NATS: {e}")
             self.health_status["nats_connected"] = False
             # Don't raise, continue without NATS for now
+    
+    async def process_anomalous_log(self, msg):
+        """Process individual anomalous log messages from Vector"""
+        try:
+            log_data = json.loads(msg.data.decode())
+            
+            # Extract tracking information from message
+            message = log_data.get('message', '')
+            tracking_id = log_data.get('tracking_id')
+            
+            # Log processing for tracking
+            logger.info(f"Processing anomalous log: tracking_id={tracking_id}, message='{message[:100]}...'")
+            
+            # Create log-based anomaly event
+            event = AnomalyEvent(
+                timestamp=datetime.now(),
+                metric_name="log_anomaly",
+                metric_value=1.0,  # Binary: anomaly detected or not
+                anomaly_score=0.9 if log_data.get('anomaly_severity') == 'critical' else 0.8,
+                anomaly_type="log_pattern",
+                detector_name="log_pattern_detector",
+                threshold=0.7,
+                metadata={
+                    "log_message": message,
+                    "tracking_id": tracking_id,
+                    "log_level": log_data.get('level'),
+                    "source_host": log_data.get('host'),
+                    "service": log_data.get('service'),
+                    "anomaly_severity": log_data.get('anomaly_severity', 'medium'),
+                    "original_timestamp": log_data.get('timestamp')
+                },
+                labels=log_data.get('labels', {})
+            )
+            
+            await self.publish_anomaly(event)
+            logger.info(f"Published log anomaly with tracking ID: {tracking_id}")
+            
+        except Exception as e:
+            logger.error(f"Error processing anomalous log: {e}")
     
     async def publish_anomaly(self, event: AnomalyEvent):
         """Publish anomaly event to NATS"""
