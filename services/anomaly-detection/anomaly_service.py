@@ -233,8 +233,12 @@ class ClickHouseClient:
     """ClickHouse client for historical data analysis"""
     
     def __init__(self):
+        import os
         from clickhouse_driver import Client
-        self.client = Client(host='clickhouse', port=9000, user='default', password='clickhouse123')
+        clickhouse_host = os.getenv('CLICKHOUSE_HOST', 'clickhouse')
+        clickhouse_user = os.getenv('CLICKHOUSE_USER', 'default')
+        clickhouse_password = os.getenv('CLICKHOUSE_PASSWORD', 'clickhouse123')
+        self.client = Client(host=clickhouse_host, port=9000, user=clickhouse_user, password=clickhouse_password)
         
     def get_historical_baselines(self, metric_name: str, days: int = 7) -> Dict[str, float]:
         """Get historical baseline metrics for comparison"""
