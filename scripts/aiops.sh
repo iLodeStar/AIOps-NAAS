@@ -47,7 +47,7 @@ Commands:
   down               Stop and remove containers
 
 Interactive wizard includes:
-  - Step-by-step mode: Start services one by one with logs and restart options
+  - Step-by-step mode: Start services in dependency order with navigation and retry options
   - Single service mode: Start just one service and exit
   - Minimal/full stack modes: Traditional grouped startup
 
@@ -66,7 +66,7 @@ Common flags (for non-interactive):
   --ollama-model <model>      Specify OLLAMA model to pull (default: mistral)
 
 Examples:
-  bash scripts/aiops.sh                 # wizard (with step-by-step option)
+  bash scripts/aiops.sh                 # wizard (with dependency-aware step-by-step option)
   bash scripts/aiops.sh up --all --pull # non-interactive full stack
   bash scripts/aiops.sh monitor         # continuous monitoring mode
 EOF
@@ -370,229 +370,280 @@ start_service_interactive() {
   fi
 }
 
+# Define dependency-aware service startup order
+get_service_startup_order() {
+  # Define services in dependency order with clear separation of tiers
+  ORDERED_SERVICES=(
+    # Tier 1: Core Infrastructure (no dependencies)
+    "clickhouse"
+    "victoria-metrics" 
+    "node-exporter"
+    "mailhog"
+    "opa"
+    "qdrant"
+    "ollama"
+    
+    # Tier 2: Data Collection & Monitoring (depends on Tier 1)
+    "vmagent"
+    "nats"
+    "grafana"
+    "alertmanager"
+    "vector"
+    
+    # Tier 3: Stream Processing (depends on Tier 1-2)
+    "benthos"
+    "benthos-enrichment"
+    "vmalert"
+    
+    # Tier 4: Core Services (depends on infrastructure + messaging)
+    "anomaly-detection"
+    "network-device-collector"
+    "application-log-collector"
+    "fleet-aggregation"
+    "incident-api"
+    "capacity-forecasting"
+    "remediation"
+    "link-health"
+    "onboarding-service"
+    
+    # Tier 5: Advanced Analytics (depends on core services)
+    "incident-explanation"
+    "cross-ship-benchmarking"
+    "data-flow-visualization"
+    "enhanced-anomaly-detection"
+  )
+}
+
 run_step_by_step_mode() {
   build_compose_args
   detect_services
+  get_service_startup_order
   
   echo "=== Step-by-Step Service Startup Mode ==="
-  echo "You can start services one by one, view logs, and handle failures interactively."
+  echo "Services will be started in dependency order to ensure proper startup sequence."
+  echo "You can navigate forward/backward, skip services, or retry failed ones."
   echo
   
-  local started_services=() failed_services=()
+  local current_index=0
+  local started_services=() failed_services=() skipped_services=()
   
-  while true; do
-    # Get list of services not yet started successfully
-    local available_services=()
-    for svc in "${ALL_SERVICES[@]}"; do
-      local already_started=false
-      for started in "${started_services[@]}"; do
-        [[ "$svc" == "$started" ]] && { already_started=true; break; }
-      done
-      [[ "$already_started" == "false" ]] && available_services+=("$svc")
+  # Filter ordered services to only include those that actually exist
+  local available_ordered_services=()
+  for svc in "${ORDERED_SERVICES[@]}"; do
+    for existing in "${ALL_SERVICES[@]}"; do
+      [[ "$svc" == "$existing" ]] && { available_ordered_services+=("$svc"); break; }
+    done
+  done
+  
+  while (( current_index < ${#available_ordered_services[@]} )); do
+    local current_service="${available_ordered_services[$current_index]}"
+    
+    # Check if service is already started
+    local already_started=false
+    for started in "${started_services[@]}"; do
+      [[ "$current_service" == "$started" ]] && { already_started=true; break; }
     done
     
-    # Check if all services are started
-    if [[ ${#available_services[@]} -eq 0 ]]; then
-      log "🎉 All services have been processed!"
-      break
+    if [[ "$already_started" == "true" ]]; then
+      ((current_index++))
+      continue
     fi
     
-    # Show current status
+    # Show current status and position
     echo
-    echo "=== Current Status ==="
-    echo "✅ Started successfully: ${#started_services[@]} services"
+    echo "=== Service Startup Progress ($((current_index + 1))/${#available_ordered_services[@]}) ==="
+    echo "🎯 Current: $current_service"
+    echo "✅ Started: ${#started_services[@]} services"
     [[ ${#started_services[@]} -gt 0 ]] && echo "   ${started_services[*]}"
     echo "❌ Failed: ${#failed_services[@]} services"
     [[ ${#failed_services[@]} -gt 0 ]] && echo "   ${failed_services[*]}"
-    echo "⏳ Remaining: ${#available_services[@]} services"
-    echo "   ${available_services[*]}"
+    echo "⏭️  Skipped: ${#skipped_services[@]} services"
+    [[ ${#skipped_services[@]} -gt 0 ]] && echo "   ${skipped_services[*]}"
+    
+    # Show upcoming services
+    if (( current_index + 1 < ${#available_ordered_services[@]} )); then
+      echo "📋 Next up:"
+      local end_idx=$((current_index + 4))
+      (( end_idx > ${#available_ordered_services[@]} )) && end_idx=${#available_ordered_services[@]}
+      for ((i = current_index + 1; i < end_idx; i++)); do
+        echo "   ${available_ordered_services[$i]}"
+      done
+      (( end_idx < ${#available_ordered_services[@]} )) && echo "   ... and $((${#available_ordered_services[@]} - end_idx)) more"
+    fi
     echo
     
-    # Ask user what to do next
-    echo "What would you like to do?"
-    echo "  [1] Start a new service"
-    echo "  [2] Retry a failed service"
-    echo "  [3] View logs for a running service"
-    echo "  [4] Check status of all services"
-    echo "  [5] Exit step-by-step mode"
+    # Check if service has failed before
+    local has_failed=false
+    for failed in "${failed_services[@]}"; do
+      [[ "$current_service" == "$failed" ]] && { has_failed=true; break; }
+    done
+    
+    if [[ "$has_failed" == "true" ]]; then
+      echo "⚠️  This service has failed before."
+    fi
+    
+    # Show service options
+    echo "Options for '$current_service':"
+    echo "  [s] Start this service"
+    echo "  [k] Skip and go to next service"
+    if (( current_index > 0 )); then
+      echo "  [p] Go back to previous service"
+    fi
+    if [[ "$has_failed" == "true" ]]; then
+      echo "  [r] Restart this service (retry)"
+    fi
+    echo "  [l] View logs for this service"
+    echo "  [v] View logs for any running service"
+    echo "  [t] Check status of all services"
+    echo "  [q] Quit step-by-step mode"
     echo
     
     local choice
-    read -r -p "Choose option [1-5]: " choice || choice=""
+    read -r -p "Choose option: " choice || choice=""
     
     case "$choice" in
-      1)
-        if [[ ${#available_services[@]} -eq 0 ]]; then
-          echo "No more services to start!"
-          continue
-        fi
-        
-        echo "Available services to start:"
-        local i=1
-        for svc in "${available_services[@]}"; do
-          echo "  [$i] $svc"
-          i=$((i+1))
-        done
-        echo
-        
-        local svc_choice
-        read -r -p "Select service number or name: " svc_choice || svc_choice=""
-        
-        local selected_service=""
-        if [[ "$svc_choice" =~ ^[0-9]+$ ]]; then
-          local idx=$((svc_choice-1))
-          if (( idx>=0 && idx<${#available_services[@]} )); then
-            selected_service="${available_services[$idx]}"
-          fi
-        else
-          for svc in "${available_services[@]}"; do
-            [[ "$svc" == "$svc_choice" ]] && { selected_service="$svc"; break; }
+      s|S|""|" ")
+        echo "Starting $current_service..."
+        if start_service_interactive "$current_service"; then
+          started_services+=("$current_service")
+          # Remove from failed list if it was there
+          local temp_failed=()
+          for f in "${failed_services[@]}"; do
+            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
           done
-        fi
-        
-        if [[ -z "$selected_service" ]]; then
-          warn "Invalid service selection. Try again."
-          continue
-        fi
-        
-        if start_service_interactive "$selected_service"; then
-          started_services+=("$selected_service")
-          echo
-          if ask_yes_no "Service started successfully! Continue to next service?" "Y"; then
-            continue
-          else
-            log "Exiting step-by-step mode as requested."
-            break
-          fi
+          failed_services=("${temp_failed[@]}")
+          log "✅ $current_service started successfully!"
+          ((current_index++))
         else
-          failed_services+=("$selected_service")
+          failed_services+=("$current_service")
+          log "❌ $current_service failed to start"
           echo
-          echo "Service failed to start. What would you like to do?"
+          echo "What would you like to do with the failed service?"
+          echo "  [n] Continue to next service"
           echo "  [r] Retry this service"
-          echo "  [s] Skip and continue with other services"
-          echo "  [l] View more logs for this service"
-          echo "  [q] Quit step-by-step mode"
+          echo "  [l] View detailed logs"
+          echo "  [q] Quit"
           
-          local retry_choice
-          read -r -p "Choose [r/s/l/q]: " retry_choice || retry_choice=""
+          local fail_choice
+          read -r -p "Choose [n/r/l/q]: " fail_choice || fail_choice=""
           
-          case "$retry_choice" in
+          case "$fail_choice" in
+            n|N|"")
+              log "Continuing to next service..."
+              ((current_index++))
+              ;;
             r|R)
               # Remove from failed list to retry
               local temp_failed=()
               for f in "${failed_services[@]}"; do
-                [[ "$f" != "$selected_service" ]] && temp_failed+=("$f")
+                [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
               done
               failed_services=("${temp_failed[@]}")
-              log "Retrying $selected_service..."
-              continue
-              ;;
-            s|S)
-              log "Skipping $selected_service and continuing..."
-              continue
+              log "Retrying $current_service..."
+              # Stay on same index to retry
               ;;
             l|L)
-              echo "=== Full logs for $selected_service ==="
-              dc logs --tail=50 --no-color "$selected_service" 2>/dev/null || echo "No logs available"
+              echo "=== Detailed logs for $current_service ==="
+              dc logs --tail=100 --no-color "$current_service" 2>/dev/null || echo "No logs available"
               echo "=== End of logs ==="
-              continue
+              read -r -p "Press Enter to continue..." || true
               ;;
             q|Q)
-              log "Exiting step-by-step mode as requested."
-              break
+              log "Exiting step-by-step mode."
+              return
               ;;
             *)
-              warn "Invalid choice. Continuing to next service..."
-              continue
+              log "Invalid choice. Continuing to next service..."
+              ((current_index++))
               ;;
           esac
         fi
         ;;
         
-      2)
-        if [[ ${#failed_services[@]} -eq 0 ]]; then
-          echo "No failed services to retry!"
-          continue
-        fi
+      k|K)
+        log "Skipping $current_service"
+        skipped_services+=("$current_service")
+        ((current_index++))
+        ;;
         
-        echo "Failed services:"
-        local i=1
-        for svc in "${failed_services[@]}"; do
-          echo "  [$i] $svc"
-          i=$((i+1))
-        done
-        echo
-        
-        local retry_choice
-        read -r -p "Select service number or name to retry: " retry_choice || retry_choice=""
-        
-        local selected_service=""
-        if [[ "$retry_choice" =~ ^[0-9]+$ ]]; then
-          local idx=$((retry_choice-1))
-          if (( idx>=0 && idx<${#failed_services[@]} )); then
-            selected_service="${failed_services[$idx]}"
-          fi
+      p|P)
+        if (( current_index > 0 )); then
+          ((current_index--))
+          log "Going back to ${available_ordered_services[$current_index]}"
         else
-          for svc in "${failed_services[@]}"; do
-            [[ "$svc" == "$retry_choice" ]] && { selected_service="$svc"; break; }
-          done
-        fi
-        
-        if [[ -z "$selected_service" ]]; then
-          warn "Invalid service selection. Try again."
-          continue
-        fi
-        
-        # Remove from failed list
-        local temp_failed=()
-        for f in "${failed_services[@]}"; do
-          [[ "$f" != "$selected_service" ]] && temp_failed+=("$f")
-        done
-        failed_services=("${temp_failed[@]}")
-        
-        if start_service_interactive "$selected_service"; then
-          started_services+=("$selected_service")
-        else
-          failed_services+=("$selected_service")
+          warn "Already at the first service."
         fi
         ;;
         
-      3)
-        detect_services
-        echo "Available services:"
-        local i=1
-        for svc in "${ALL_SERVICES[@]}"; do
-          echo "  [$i] $svc"
-          i=$((i+1))
-        done
-        echo
-        
-        local log_choice
-        read -r -p "Select service number or name to view logs: " log_choice || log_choice=""
-        
-        local selected_service=""
-        if [[ "$log_choice" =~ ^[0-9]+$ ]]; then
-          local idx=$((log_choice-1))
-          if (( idx>=0 && idx<${#ALL_SERVICES[@]} )); then
-            selected_service="${ALL_SERVICES[$idx]}"
-          fi
-        else
-          for svc in "${ALL_SERVICES[@]}"; do
-            [[ "$svc" == "$log_choice" ]] && { selected_service="$svc"; break; }
+      r|R)
+        if [[ "$has_failed" == "true" ]]; then
+          # Remove from failed list
+          local temp_failed=()
+          for f in "${failed_services[@]}"; do
+            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
           done
-        fi
-        
-        if [[ -n "$selected_service" ]]; then
-          echo "=== Live logs for $selected_service (Press Ctrl+C to stop) ==="
-          dc logs -f --tail=20 "$selected_service" 2>/dev/null || echo "No logs available"
+          failed_services=("${temp_failed[@]}")
+          log "Retrying $current_service..."
+          # Stay on same index to retry
         else
-          warn "Invalid service selection."
+          warn "Service hasn't failed yet. Use 's' to start it."
         fi
         ;;
         
-      4)
+      l|L)
+        echo "=== Logs for $current_service ==="
+        dc logs --tail=20 --no-color "$current_service" 2>/dev/null || echo "No logs available yet"
+        echo "=== End of logs ==="
+        read -r -p "Press Enter to continue..." || true
+        ;;
+        
+      v|V)
+        echo "Running services with logs:"
+        local running_services=()
+        for svc in "${started_services[@]}"; do
+          if [[ "$(docker_state "$svc" | cut -d: -f1)" == "running" ]]; then
+            running_services+=("$svc")
+          fi
+        done
+        
+        if [[ ${#running_services[@]} -eq 0 ]]; then
+          echo "No services are currently running."
+        else
+          local i=1
+          for svc in "${running_services[@]}"; do
+            echo "  [$i] $svc"
+            i=$((i+1))
+          done
+          echo
+          
+          local log_choice
+          read -r -p "Select service number or name to view logs: " log_choice || log_choice=""
+          
+          local selected_service=""
+          if [[ "$log_choice" =~ ^[0-9]+$ ]]; then
+            local idx=$((log_choice-1))
+            if (( idx>=0 && idx<${#running_services[@]} )); then
+              selected_service="${running_services[$idx]}"
+            fi
+          else
+            for svc in "${running_services[@]}"; do
+              [[ "$svc" == "$log_choice" ]] && { selected_service="$svc"; break; }
+            done
+          fi
+          
+          if [[ -n "$selected_service" ]]; then
+            echo "=== Live logs for $selected_service (Press Ctrl+C to stop) ==="
+            dc logs -f --tail=20 "$selected_service" 2>/dev/null || echo "No logs available"
+          else
+            warn "Invalid service selection."
+          fi
+        fi
+        read -r -p "Press Enter to continue..." || true
+        ;;
+        
+      t|T)
         echo "=== Service Status Check ==="
-        for svc in "${ALL_SERVICES[@]}"; do
+        for svc in "${available_ordered_services[@]}"; do
           local app_url; app_url="$(app_health_url "$svc")"
           IFS=":" read -r status health <<<"$(docker_state "$svc")"
           local app_status="N/A"
@@ -617,16 +668,27 @@ run_step_by_step_mode() {
         read -r -p "Press Enter to continue..." || true
         ;;
         
-      5)
+      q|Q)
         log "Exiting step-by-step mode."
         break
         ;;
         
       *)
-        warn "Invalid choice. Please select 1-5."
+        warn "Invalid choice. Please try again."
         ;;
     esac
   done
+  
+  # Final summary
+  echo
+  echo "=== Step-by-Step Mode Complete ==="
+  echo "✅ Started successfully: ${#started_services[@]} services"
+  [[ ${#started_services[@]} -gt 0 ]] && echo "   ${started_services[*]}"
+  echo "❌ Failed: ${#failed_services[@]} services"
+  [[ ${#failed_services[@]} -gt 0 ]] && echo "   ${failed_services[*]}"
+  echo "⏭️  Skipped: ${#skipped_services[@]} services"
+  [[ ${#skipped_services[@]} -gt 0 ]] && echo "   ${skipped_services[*]}"
+  echo
   
   echo
 start_services() {
@@ -744,7 +806,7 @@ run_wizard() {
   fi
 
   local single="no" step_by_step="no"
-  if ask_yes_no "Do you want to start services one by one with interactive logs and restart options?" "N"; then
+  if ask_yes_no "Do you want to start services step-by-step in dependency order with full control?" "N"; then
     step_by_step="yes"
     MODE="step-by-step"
   elif ask_yes_no "Do you want to start a single service instead of the whole stack?" "N"; then
