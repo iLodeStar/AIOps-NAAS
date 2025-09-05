@@ -1,8 +1,7 @@
 pysnmp==4.4.12
 pysnmp-mibs==0.1.6
 prometheus-client==0.17.1
-pynats2==2.3.1
-asyncio-nats-client==0.11.5
+nats-py==2.3.1
 pyyaml==6.0.1
 aiohttp==3.8.5
 networkx==3.1
