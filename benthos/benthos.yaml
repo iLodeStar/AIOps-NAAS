@@ -75,7 +75,7 @@ pipeline:
         }
         
         # Standardize anomaly scoring across sources
-        root.anomaly_score = if exists(this.anomaly_score) {
+        root.anomaly_score = if this.anomaly_score != null {
           this.anomaly_score
         } else if this.severity == "critical" {
           0.9
@@ -151,7 +151,7 @@ pipeline:
     - cache:
         resource: "temporal_cache"
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_\" + now().truncate(\"5m\").format(timestamp_unix) }"
+        key: "${! json(\"ship_id\") + \"_\" + (timestamp_unix() / 300 | floor).string() }"
         value: "${! content() }"
         ttl: "900s"  # 15 minute temporal correlation window
         
@@ -159,34 +159,13 @@ pipeline:
     - cache:
         resource: "correlation_cache"
         operator: "get"  
-        key: "${! 
-          # Look for related CPU/memory correlation
-          if json(\"metric_name\") == \"cpu_usage\" { 
-            json(\"ship_id\") + \"_basic_metrics_memory_usage\"
-          } else if json(\"metric_name\") == \"memory_usage\" { 
-            json(\"ship_id\") + \"_basic_metrics_cpu_usage\"
-          # Look for application errors during system anomalies
-          } else if json(\"event_source\") == \"basic_metrics\" {
-            json(\"ship_id\") + \"_application_logs_log_anomaly\"
-          # Look for network issues during application errors
-          } else if json(\"event_source\") == \"application_logs\" {
-            json(\"ship_id\") + \"_snmp_network_\"
-          } else {
-            \"\"
-          }
-        }"
+        key: "${! if json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_\" } else { \"\" } }"
         
     # Fetch secondary correlation (network during system issues)
     - cache:
         resource: "correlation_cache"
         operator: "get"
-        key: "${! 
-          if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\").contains(\"cpu\") {
-            json(\"ship_id\") + \"_snmp_network_interface_utilization\"
-          } else {
-            \"\"
-          }
-        }"
+        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"\" } }"
         
     # Create comprehensive correlated incidents
     - mapping: |
@@ -273,20 +252,43 @@ pipeline:
         root.correlated_events = all_events
         
         # Enhanced severity calculation considering all correlated events
-        let max_severity = this.severity
-        if related != null && related.severity.priority() > max_severity.priority() {
-          max_severity = related.severity
-        }
-        if secondary != null && secondary.severity.priority() > max_severity.priority() {
-          max_severity = secondary.severity
+        let severity_priority = match this.severity {
+          "critical" => 4
+          "high" => 3  
+          "medium" => 2
+          _ => 1
         }
         
-        root.incident_severity = max_severity
+        let related_priority = if related != null {
+          match related.severity {
+            "critical" => 4
+            "high" => 3
+            "medium" => 2
+            _ => 1
+          }
+        } else { 0 }
+        
+        let secondary_priority = if secondary != null {
+          match secondary.severity {
+            "critical" => 4
+            "high" => 3
+            "medium" => 2
+            _ => 1
+          }
+        } else { 0 }
+        
+        let max_priority = [severity_priority, related_priority, secondary_priority].max()
+        root.incident_severity = match max_priority {
+          4 => "critical"
+          3 => "high"
+          2 => "medium"
+          _ => "low"
+        }
         
         # Comprehensive correlation confidence
-        root.correlation_confidence = if len(all_events) > 2 {
+        root.correlation_confidence = if all_events.length() > 2 {
           0.95  # High confidence with 3+ correlated events
-        } else if len(all_events) == 2 {
+        } else if all_events.length() == 2 {
           0.85  # Good confidence with 2 correlated events
         } else if this.is_enriched {
           0.75  # Medium confidence for enriched single events
