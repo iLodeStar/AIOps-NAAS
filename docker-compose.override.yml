@@ -19,7 +19,7 @@ services:
   clickhouse:
     environment:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
 
   # Node Exporter - Override for WSL2/private-root mount compatibility
   node-exporter:

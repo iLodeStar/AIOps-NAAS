@@ -57,8 +57,8 @@ pipeline:
         root.original_timestamp = this.timestamp
         
         # Determine data source type from NATS subject
-        root.data_source = meta("nats_subject").split(".")[1] 
-        root.data_category = meta("nats_subject").split(".")[2] || "general"
+        root.data_source = meta("nats_subject").split(".").index(1) 
+        root.data_category = meta("nats_subject").split(".").index(2).catch("general")
         
         # Add ship identifier
         root.ship_id = this.ship_id || "ship-01"
@@ -228,17 +228,11 @@ pipeline:
           
           # Interface-specific correlation for switches and routers
           if this.original_data.interfaces != null && this.original_data.interfaces.type() == "array" {
-            root.enrichment_context.network_correlation.critical_interfaces = []
-            for interface in this.original_data.interfaces {
-              if interface.utilization_percent != null && interface.utilization_percent > 80 {
-                root.enrichment_context.network_correlation.critical_interfaces = 
-                  root.enrichment_context.network_correlation.critical_interfaces.append({
-                    "interface": interface.interface_name,
-                    "utilization": interface.utilization_percent,
-                    "status": interface.oper_status || "unknown"
-                  })
-              }
-            }
+            root.enrichment_context.network_correlation.critical_interfaces = this.original_data.interfaces.filter(interface -> interface.utilization_percent != null && interface.utilization_percent > 80).map_each(interface -> {
+              "interface": interface.interface_name,
+              "utilization": interface.utilization_percent,
+              "status": interface.oper_status.catch("unknown")
+            })
           }
         }
         
@@ -315,9 +309,7 @@ cache_resources:
 
 # Metrics and monitoring
 metrics:
-  prometheus:
-    prefix: "benthos_enrichment"
-    push_interval: "30s"
+  prometheus: {}
     
 logger:
   level: INFO

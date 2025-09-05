@@ -14,7 +14,7 @@ scrape_configs:
     static_configs:
       - targets: ['nats:8222']
     scrape_interval: 30s
-    metrics_path: /varz
+    metrics_path: /metrics
 
   # VictoriaMetrics self-monitoring
   - job_name: 'victoria-metrics'
