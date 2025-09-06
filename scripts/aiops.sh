@@ -502,7 +502,10 @@ run_step_by_step_mode() {
     echo
     
     local choice
-    read -r -p "Choose option: " choice || choice=""
+    if ! read -r -p "Choose option: " choice 2>/dev/null; then
+      log "Input stream ended. Exiting step-by-step mode."
+      break
+    fi
     
     case "$choice" in
       s|S|""|" ")
@@ -517,7 +520,7 @@ run_step_by_step_mode() {
           failed_services=("${temp_failed[@]}")
           log "✅ $current_service started successfully!"
           ((current_index++))
-          log "Advancing to next service (${current_index}/${#available_ordered_services[@]})"
+          # Continue to next service automatically in the loop
         else
           failed_services+=("$current_service")
           log "❌ $current_service failed to start"
