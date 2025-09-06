@@ -297,8 +297,7 @@ output:
           subject: "enriched.for_anomaly_detection"
           
       # Log enriched events for debugging
-      - stdout:
-          codec: json_lines
+      - stdout: {}
 
 # Cache resources for data correlation
 cache_resources:
