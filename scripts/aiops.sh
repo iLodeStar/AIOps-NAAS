@@ -352,7 +352,11 @@ start_service_interactive() {
   # Show real-time logs for a few seconds with more detail
   echo "=== Starting $svc - Showing initial logs ==="
   echo "Docker container logs (live for 10 seconds):"
-  timeout 10 dc logs -f --tail=20 "$svc" 2>/dev/null || true
+  if timeout 10 dc logs -f --tail=20 "$svc" 2>&1; then
+    echo "(Logs displayed successfully)"
+  else
+    echo "(No logs available yet or service starting up)"
+  fi
   echo "=== End of initial logs ==="
   
   # Check service status
@@ -477,7 +481,7 @@ run_step_by_step_mode() {
     done
     
     if [[ "$already_started" == "true" ]]; then
-      ((current_index++))
+      current_index=$((current_index + 1))
       continue
     fi
     
@@ -506,9 +510,11 @@ run_step_by_step_mode() {
     
     # Check if service has failed before
     local has_failed=false
-    for failed in "${failed_services[@]}"; do
-      [[ "$current_service" == "$failed" ]] && { has_failed=true; break; }
-    done
+    if [[ ${#failed_services[@]} -gt 0 ]]; then
+      for failed in "${failed_services[@]}"; do
+        [[ "$current_service" == "$failed" ]] && { has_failed=true; break; }
+      done
+    fi
     
     if [[ "$has_failed" == "true" ]]; then
       echo "⚠️  This service has failed before."
@@ -543,32 +549,42 @@ run_step_by_step_mode() {
           started_services+=("$current_service")
           # Remove from failed list if it was there
           local temp_failed=()
-          for f in "${failed_services[@]}"; do
-            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-          done
-          failed_services=("${temp_failed[@]}")
+          if [[ ${#failed_services[@]} -gt 0 ]]; then
+            for f in "${failed_services[@]}"; do
+              [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+            done
+          fi
+          failed_services=()
+          if [[ ${#temp_failed[@]} -gt 0 ]]; then
+            failed_services=("${temp_failed[@]}")
+          fi
           log "✅ $current_service started successfully!"
           
           # Check if this is the last service
           if (( current_index + 1 >= ${#available_ordered_services[@]} )); then
             log "🎉 All services completed! Showing final summary..."
-            ((current_index++))
+            current_index=$((current_index + 1))
             break
           fi
           
           # Move to next service and ask for next action
-          ((current_index++))
+          current_index=$((current_index + 1))
           echo
-          echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
-          echo "Press Enter to continue or type 'q' to quit step-by-step mode..."
-          local continue_choice=""
-          read -r -p "[Continue/q]: " continue_choice || {
-            log "Input stream ended. Exiting step-by-step mode."
-            break
-          }
-          
-          if [[ "$continue_choice" =~ ^[Qq]$ ]]; then
-            log "Exiting step-by-step mode at user request."
+          if (( current_index < ${#available_ordered_services[@]} )); then
+            echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
+            echo "Press Enter to continue or type 'q' to quit step-by-step mode..."
+            local continue_choice=""
+            read -r -p "[Continue/q]: " continue_choice || {
+              log "Input stream ended. Exiting step-by-step mode."
+              break
+            }
+            
+            if [[ "$continue_choice" =~ ^[Qq]$ ]]; then
+              log "Exiting step-by-step mode at user request."
+              break
+            fi
+          else
+            log "🎉 All services completed! Index out of bounds check."
             break
           fi
           
@@ -589,15 +605,20 @@ run_step_by_step_mode() {
           case "$fail_choice" in
             n|N|"")
               log "Continuing to next service..."
-              ((current_index++))
+              current_index=$((current_index + 1))
               ;;
             r|R)
               # Remove from failed list to retry
               local temp_failed=()
-              for f in "${failed_services[@]}"; do
-                [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-              done
-              failed_services=("${temp_failed[@]}")
+              if [[ ${#failed_services[@]} -gt 0 ]]; then
+                for f in "${failed_services[@]}"; do
+                  [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+                done
+              fi
+              failed_services=()
+              if [[ ${#temp_failed[@]} -gt 0 ]]; then
+                failed_services=("${temp_failed[@]}")
+              fi
               log "Retrying $current_service..."
               # Stay on same index to retry
               ;;
@@ -613,7 +634,7 @@ run_step_by_step_mode() {
               ;;
             *)
               log "Invalid choice. Continuing to next service..."
-              ((current_index++))
+              current_index=$((current_index + 1))
               ;;
           esac
         fi
@@ -622,12 +643,12 @@ run_step_by_step_mode() {
       k|K)
         log "Skipping $current_service"
         skipped_services+=("$current_service")
-        ((current_index++))
+        current_index=$((current_index + 1))
         ;;
         
       p|P)
         if (( current_index > 0 )); then
-          ((current_index--))
+          current_index=$((current_index - 1))
           log "Going back to ${available_ordered_services[$current_index]}"
         else
           warn "Already at the first service."
@@ -638,10 +659,15 @@ run_step_by_step_mode() {
         if [[ "$has_failed" == "true" ]]; then
           # Remove from failed list
           local temp_failed=()
-          for f in "${failed_services[@]}"; do
-            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-          done
-          failed_services=("${temp_failed[@]}")
+          if [[ ${#failed_services[@]} -gt 0 ]]; then
+            for f in "${failed_services[@]}"; do
+              [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+            done
+          fi
+          failed_services=()
+          if [[ ${#temp_failed[@]} -gt 0 ]]; then
+            failed_services=("${temp_failed[@]}")
+          fi
           log "Retrying $current_service..."
           # Stay on same index to retry
         else
