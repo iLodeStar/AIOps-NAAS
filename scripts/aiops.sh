@@ -510,9 +510,11 @@ run_step_by_step_mode() {
     
     # Check if service has failed before
     local has_failed=false
-    for failed in "${failed_services[@]}"; do
-      [[ "$current_service" == "$failed" ]] && { has_failed=true; break; }
-    done
+    if [[ ${#failed_services[@]} -gt 0 ]]; then
+      for failed in "${failed_services[@]}"; do
+        [[ "$current_service" == "$failed" ]] && { has_failed=true; break; }
+      done
+    fi
     
     if [[ "$has_failed" == "true" ]]; then
       echo "⚠️  This service has failed before."
@@ -547,10 +549,15 @@ run_step_by_step_mode() {
           started_services+=("$current_service")
           # Remove from failed list if it was there
           local temp_failed=()
-          for f in "${failed_services[@]}"; do
-            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-          done
-          failed_services=("${temp_failed[@]}")
+          if [[ ${#failed_services[@]} -gt 0 ]]; then
+            for f in "${failed_services[@]}"; do
+              [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+            done
+          fi
+          failed_services=()
+          if [[ ${#temp_failed[@]} -gt 0 ]]; then
+            failed_services=("${temp_failed[@]}")
+          fi
           log "✅ $current_service started successfully!"
           
           # Check if this is the last service
@@ -603,10 +610,15 @@ run_step_by_step_mode() {
             r|R)
               # Remove from failed list to retry
               local temp_failed=()
-              for f in "${failed_services[@]}"; do
-                [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-              done
-              failed_services=("${temp_failed[@]}")
+              if [[ ${#failed_services[@]} -gt 0 ]]; then
+                for f in "${failed_services[@]}"; do
+                  [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+                done
+              fi
+              failed_services=()
+              if [[ ${#temp_failed[@]} -gt 0 ]]; then
+                failed_services=("${temp_failed[@]}")
+              fi
               log "Retrying $current_service..."
               # Stay on same index to retry
               ;;
@@ -647,10 +659,15 @@ run_step_by_step_mode() {
         if [[ "$has_failed" == "true" ]]; then
           # Remove from failed list
           local temp_failed=()
-          for f in "${failed_services[@]}"; do
-            [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
-          done
-          failed_services=("${temp_failed[@]}")
+          if [[ ${#failed_services[@]} -gt 0 ]]; then
+            for f in "${failed_services[@]}"; do
+              [[ "$f" != "$current_service" ]] && temp_failed+=("$f")
+            done
+          fi
+          failed_services=()
+          if [[ ${#temp_failed[@]} -gt 0 ]]; then
+            failed_services=("${temp_failed[@]}")
+          fi
           log "Retrying $current_service..."
           # Stay on same index to retry
         else
