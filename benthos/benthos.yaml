@@ -394,6 +394,10 @@ cache_resources:
     memory:
       default_ttl: "600s"
       
+  - label: "temporal_cache"
+    memory:
+      default_ttl: "900s"
+      
   - label: "suppression_cache"
     memory:
       default_ttl: "300s"
