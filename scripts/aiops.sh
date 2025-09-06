@@ -352,7 +352,11 @@ start_service_interactive() {
   # Show real-time logs for a few seconds with more detail
   echo "=== Starting $svc - Showing initial logs ==="
   echo "Docker container logs (live for 10 seconds):"
-  timeout 10 dc logs -f --tail=20 "$svc" 2>/dev/null || true
+  if timeout 10 dc logs -f --tail=20 "$svc" 2>&1; then
+    echo "(Logs displayed successfully)"
+  else
+    echo "(No logs available yet or service starting up)"
+  fi
   echo "=== End of initial logs ==="
   
   # Check service status
@@ -559,16 +563,21 @@ run_step_by_step_mode() {
           # Move to next service and ask for next action
           ((current_index++))
           echo
-          echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
-          echo "Press Enter to continue or type 'q' to quit step-by-step mode..."
-          local continue_choice=""
-          read -r -p "[Continue/q]: " continue_choice || {
-            log "Input stream ended. Exiting step-by-step mode."
-            break
-          }
-          
-          if [[ "$continue_choice" =~ ^[Qq]$ ]]; then
-            log "Exiting step-by-step mode at user request."
+          if (( current_index < ${#available_ordered_services[@]} )); then
+            echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
+            echo "Press Enter to continue or type 'q' to quit step-by-step mode..."
+            local continue_choice=""
+            read -r -p "[Continue/q]: " continue_choice || {
+              log "Input stream ended. Exiting step-by-step mode."
+              break
+            }
+            
+            if [[ "$continue_choice" =~ ^[Qq]$ ]]; then
+              log "Exiting step-by-step mode at user request."
+              break
+            fi
+          else
+            log "🎉 All services completed! Index out of bounds check."
             break
           fi
           
