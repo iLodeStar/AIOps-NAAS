@@ -349,8 +349,9 @@ start_service_interactive() {
   # Start the service
   dc up -d "$svc" >/dev/null 2>&1 || true
   
-  # Show real-time logs for a few seconds
+  # Show real-time logs for a few seconds with more detail
   echo "=== Starting $svc - Showing initial logs ==="
+  echo "Docker container logs (live for 10 seconds):"
   timeout 10 dc logs -f --tail=20 "$svc" 2>/dev/null || true
   echo "=== End of initial logs ==="
   
@@ -363,9 +364,37 @@ start_service_interactive() {
   
   if [[ "$state" == ok* ]]; then
     log "✅ $svc: STARTED SUCCESSFULLY ($state)"
+    
+    # Show additional debug info for successful services
+    echo "=== Docker Debug Info ==="
+    local cid; cid="$(dc ps -q "$svc" 2>/dev/null || true)"
+    if [[ -n "$cid" ]]; then
+      echo "Container ID: $cid"
+      echo "Container Status: $(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo "unknown")"
+      echo "Container Health: $(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "unknown")"
+      local app_url; app_url="$(app_health_url "$svc")"
+      if [[ -n "$app_url" ]]; then
+        echo "Health URL: $app_url"
+        if curl -fsS --max-time 2 "$app_url" >/dev/null 2>&1; then
+          echo "Health Check: ✅ HEALTHY"
+        else
+          echo "Health Check: ❌ UNHEALTHY (but container is running)"
+        fi
+      fi
+    fi
+    echo "=== End Debug Info ==="
+    
     return 0
   else
     warn "❌ $svc: FAILED TO START ($state)"
+    echo "=== Docker Debug Info for Failed Service ==="
+    local cid; cid="$(dc ps -q "$svc" 2>/dev/null || true)"
+    if [[ -n "$cid" ]]; then
+      echo "Container ID: $cid"
+      echo "Container Status: $(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo "unknown")"
+      echo "Exit Code: $(docker inspect -f '{{.State.ExitCode}}' "$cid" 2>/dev/null || echo "unknown")"
+      echo "Error: $(docker inspect -f '{{.State.Error}}' "$cid" 2>/dev/null || echo "none")"
+    fi
     echo "=== Recent error logs for $svc ==="
     dc logs --tail=30 --no-color "$svc" 2>/dev/null | tail -10 || true
     echo "=== End of error logs ==="
@@ -519,8 +548,31 @@ run_step_by_step_mode() {
           done
           failed_services=("${temp_failed[@]}")
           log "✅ $current_service started successfully!"
+          
+          # Check if this is the last service
+          if (( current_index + 1 >= ${#available_ordered_services[@]} )); then
+            log "🎉 All services completed! Showing final summary..."
+            ((current_index++))
+            break
+          fi
+          
+          # Move to next service and ask for next action
           ((current_index++))
-          # Continue to next service automatically in the loop
+          echo
+          echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
+          echo "Press Enter to continue or type 'q' to quit step-by-step mode..."
+          local continue_choice=""
+          read -r -p "[Continue/q]: " continue_choice || {
+            log "Input stream ended. Exiting step-by-step mode."
+            break
+          }
+          
+          if [[ "$continue_choice" =~ ^[Qq]$ ]]; then
+            log "Exiting step-by-step mode at user request."
+            break
+          fi
+          
+          # Continue to next iteration of the main loop
         else
           failed_services+=("$current_service")
           log "❌ $current_service failed to start"
@@ -696,50 +748,9 @@ run_step_by_step_mode() {
   echo "⏭️  Skipped: ${#skipped_services[@]} services"
   [[ ${#skipped_services[@]} -gt 0 ]] && echo "   ${skipped_services[*]}"
   echo
-  
-  echo
-start_services() {
-  local services=("$@") failures=()
-  for svc in "${services[@]}"; do
-    for x in $EXCLUDE_SERVICES; do
-      [[ "$x" == "$svc" ]] && { log " - $svc: skipped (excluded)"; continue 2; }
-    done
-
-    log "Starting $svc"
-    dc up -d "$svc" >/dev/null 2>&1 || true
-    state="$(wait_for_service "$svc")"
-    if [[ "$state" == ok* ]]; then
-      log " - $svc: OK ($state)"
-      continue
-    fi
-
-    warn " - $svc: not ready ($state)"
-    if [[ "$AUTO_FIX" == "true" ]]; then
-      if auto_fix_service "$svc"; then
-        log " - $svc: applied auto-fix, rechecking..."
-        state="$(wait_for_service "$svc")"
-        if [[ "$state" == ok* ]]; then
-          log " - $svc: OK after fix ($state)"
-          continue
-        fi
-      fi
-    fi
-    failures+=("$svc|$state")
-  done
-
-  if (( ${#failures[@]} > 0 )); then
-    warn "Some services failed: ${#failures[@]}"
-    for item in "${failures[@]}"; do
-      local svc="${item%%|*}"
-      dc logs --no-color --timestamps --tail=1000 "$svc" > "$OUT_DIR/${svc}.log" 2>&1 || true
-      cid="$(dc ps -q "$svc" || true)"
-      [[ -n "$cid" ]] && docker inspect "$cid" > "$OUT_DIR/${svc}.inspect.json" 2>/dev/null || true
-      warn " - $svc (details in $OUT_DIR/${svc}.log)"
-    done
-    return 1
-  fi
-  return 0
 }
+
+start_services() {
   local services=("$@") failures=()
   for svc in "${services[@]}"; do
     for x in $EXCLUDE_SERVICES; do
