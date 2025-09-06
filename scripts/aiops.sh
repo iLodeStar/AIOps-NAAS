@@ -481,7 +481,7 @@ run_step_by_step_mode() {
     done
     
     if [[ "$already_started" == "true" ]]; then
-      ((current_index++))
+      current_index=$((current_index + 1))
       continue
     fi
     
@@ -563,12 +563,12 @@ run_step_by_step_mode() {
           # Check if this is the last service
           if (( current_index + 1 >= ${#available_ordered_services[@]} )); then
             log "🎉 All services completed! Showing final summary..."
-            ((current_index++))
+            current_index=$((current_index + 1))
             break
           fi
           
           # Move to next service and ask for next action
-          ((current_index++))
+          current_index=$((current_index + 1))
           echo
           if (( current_index < ${#available_ordered_services[@]} )); then
             echo "✨ Ready to continue with next service: ${available_ordered_services[$current_index]}"
@@ -605,7 +605,7 @@ run_step_by_step_mode() {
           case "$fail_choice" in
             n|N|"")
               log "Continuing to next service..."
-              ((current_index++))
+              current_index=$((current_index + 1))
               ;;
             r|R)
               # Remove from failed list to retry
@@ -634,7 +634,7 @@ run_step_by_step_mode() {
               ;;
             *)
               log "Invalid choice. Continuing to next service..."
-              ((current_index++))
+              current_index=$((current_index + 1))
               ;;
           esac
         fi
@@ -643,12 +643,12 @@ run_step_by_step_mode() {
       k|K)
         log "Skipping $current_service"
         skipped_services+=("$current_service")
-        ((current_index++))
+        current_index=$((current_index + 1))
         ;;
         
       p|P)
         if (( current_index > 0 )); then
-          ((current_index--))
+          current_index=$((current_index - 1))
           log "Going back to ${available_ordered_services[$current_index]}"
         else
           warn "Already at the first service."
