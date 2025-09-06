@@ -356,7 +356,10 @@ start_service_interactive() {
   
   # Check service status
   local state
-  state="$(wait_for_service "$svc")"
+  state="$(wait_for_service "$svc")" || {
+    warn "Failed to check service state for $svc"
+    return 1
+  }
   
   if [[ "$state" == ok* ]]; then
     log "✅ $svc: STARTED SUCCESSFULLY ($state)"
@@ -364,7 +367,7 @@ start_service_interactive() {
   else
     warn "❌ $svc: FAILED TO START ($state)"
     echo "=== Recent error logs for $svc ==="
-    dc logs --tail=30 --no-color "$svc" 2>/dev/null | tail -10
+    dc logs --tail=30 --no-color "$svc" 2>/dev/null | tail -10 || true
     echo "=== End of error logs ==="
     return 1
   fi
@@ -514,6 +517,7 @@ run_step_by_step_mode() {
           failed_services=("${temp_failed[@]}")
           log "✅ $current_service started successfully!"
           ((current_index++))
+          log "Advancing to next service (${current_index}/${#available_ordered_services[@]})"
         else
           failed_services+=("$current_service")
           log "❌ $current_service failed to start"
@@ -880,6 +884,7 @@ start_by_plan() {
 
   log "docker compose up -d (bootstrap)"
   if [[ "$BUILD_PARALLEL" == "true" ]]; then
+    log "Building services in parallel..."
     dc build --parallel >/dev/null 2>&1 || warn "Parallel build failed, using sequential build"
   fi
   dc up -d >/dev/null 2>&1 || true
