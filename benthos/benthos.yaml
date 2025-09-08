@@ -134,14 +134,14 @@ pipeline:
     # Enhanced deduplication based on source, context, and time window
     - dedupe:
         cache: "dedupe_cache"
-        key: "${! json(\"event_source\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"service\") }"
+        key: "${! json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null { json(\"metric_name\") } else { \"\" }) + \"_\" + json(\"ship_id\") + \"_\" + json(\"service\") }"
         drop_on_err: false
         
     # Store events for comprehensive cross-source correlation
     - cache:
         resource: "correlation_cache"  
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + json(\"metric_name\") }"
+        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null { json(\"metric_name\") } else { \"\" }) }"
         value: "${! content() }"
         ttl: "600s"  # 10 minute correlation window for comprehensive analysis
         
@@ -157,13 +157,13 @@ pipeline:
     - cache:
         resource: "correlation_cache"
         operator: "get"  
-        key: "${! if json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_\" } else { \"\" } }"
+        key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_\" } else { \"\" } }"
         
     # Fetch secondary correlation (network during system issues)
     - cache:
         resource: "correlation_cache"
         operator: "get"
-        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"\" } }"
+        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\") != null && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"\" } }"
         
     # Create comprehensive correlated incidents
     - mapping: |
@@ -198,7 +198,7 @@ pipeline:
           
         } else if this.event_source == "application_logs" && related != null && related.event_source == "basic_metrics" {
           # Application errors correlated with system metrics
-          if related.metric_name.contains("cpu") || related.metric_name.contains("memory") {
+          if related.metric_name != null && (related.metric_name.contains("cpu") || related.metric_name.contains("memory")) {
             root.incident_type = "application_system_correlation"
           } else {
             root.incident_type = "application_infrastructure_issue"
@@ -219,16 +219,16 @@ pipeline:
           }
           
         } else if related != null && 
-          ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
-           (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
+          ((this.metric_name != null && this.metric_name == "cpu_usage" && related.metric_name != null && related.metric_name == "memory_usage") ||
+           (this.metric_name != null && this.metric_name == "memory_usage" && related.metric_name != null && related.metric_name == "cpu_usage")) {
           # Traditional CPU/memory correlation
           root.incident_type = "resource_pressure"
           
         } else if this.is_enriched && this.enrichment_context != {} {
           # Multi-source correlation for enriched data
-          if (this.metric_name.contains("satellite") && this.enrichment_context.weather_impact != null) {
+          if (this.metric_name != null && this.metric_name.contains("satellite") && this.enrichment_context.weather_impact != null) {
             root.incident_type = "satellite_weather_impact"
-          } else if (this.metric_name.contains("network") && this.enrichment_context.system_load != null) {
+          } else if (this.metric_name != null && this.metric_name.contains("network") && this.enrichment_context.system_load != null) {
             root.incident_type = "network_system_correlation"
           } else {
             root.incident_type = "enriched_anomaly"
@@ -353,13 +353,13 @@ pipeline:
                 ["load_balancing", "process_optimization", "resource_scaling"]
               } else if this.incident_type == "network_system_correlation" {
                 ["network_performance_tuning", "system_resource_check", "qos_adjustment"]
-              } else if this.metric_name == "cpu_usage" {
+              } else if this.metric_name != null && this.metric_name == "cpu_usage" {
                 ["investigate_cpu_usage"]  
-              } else if this.metric_name == "memory_usage" {
+              } else if this.metric_name != null && this.metric_name == "memory_usage" {
                 ["investigate_memory_usage"]
-              } else if this.metric_name.contains("satellite") {
+              } else if this.metric_name != null && this.metric_name.contains("satellite") {
                 ["satellite_diagnostics", "signal_quality_check"]
-              } else if this.metric_name.contains("network") {
+              } else if this.metric_name != null && this.metric_name.contains("network") {
                 ["network_diagnostics", "connectivity_check"]
               } else {
                 ["generic_investigation"]
