@@ -74,53 +74,61 @@ pipeline:
         }
         
         # Standardize anomaly scoring across sources
-        root.anomaly_score = this.anomaly_score || (
-          if (this.severity || "") == "critical" { 0.9 }
-          else if (this.severity || "") == "high" { 0.8 }
-          else if (this.severity || "") == "medium" { 0.6 }
-          else { 0.4 }
-        )
+        root.anomaly_score = 0.4
+        if this.anomaly_score != null {
+          root.anomaly_score = this.anomaly_score
+        } else if this.severity != null {
+          if this.severity == "critical" {
+            root.anomaly_score = 0.9
+          } else if this.severity == "high" {
+            root.anomaly_score = 0.8
+          } else if this.severity == "medium" {
+            root.anomaly_score = 0.6
+          }
+        }
         
         # Handle different event types
-        root.is_enriched = (this.correlation_level || "") == "level_1_enriched"
+        root.is_enriched = false
+        if this.correlation_level != null && this.correlation_level == "level_1_enriched" {
+          root.is_enriched = true
+        }
         
         # Preserve contextual information
-        root.enrichment_context = this.enrichment_context || {}
-        root.maritime_context = this.maritime_context || {}
-        root.operational_status = this.operational_status || "normal"
+        root.enrichment_context = if this.enrichment_context != null { this.enrichment_context } else { {} }
+        root.maritime_context = if this.maritime_context != null { this.maritime_context } else { {} }
+        root.operational_status = if this.operational_status != null { this.operational_status } else { "normal" }
         
         # Add application-specific context
-        if (this.event_source || "") == "application_logs" {
+        if this.event_source != null && this.event_source == "application_logs" {
           root.app_context = {
-            "logger_name": this.logger_name || "",
-            "trace_id": this.trace_id || "",
-            "span_id": this.span_id || "",
-            "thread": this.thread || "",
-            "application": this.application || ""
+            "logger_name": if this.logger_name != null { this.logger_name } else { "" },
+            "trace_id": if this.trace_id != null { this.trace_id } else { "" },
+            "span_id": if this.span_id != null { this.span_id } else { "" },
+            "thread": if this.thread != null { this.thread } else { "" },
+            "application": if this.application != null { this.application } else { "" }
           }
         }
         
         # Add network-specific context
-        if (this.event_source || "") == "snmp_network" {
+        if this.event_source != null && this.event_source == "snmp_network" {
           root.network_context = {
-            "device_type": this.labels.device_type || "",
-            "device_ip": this.host || "",
-            "interface": this.labels.interface || "",
-            "metric_name": this.metric_name || ""
+            "device_type": if this.labels != null && this.labels.device_type != null { this.labels.device_type } else { "" },
+            "device_ip": if this.host != null { this.host } else { "" },
+            "interface": if this.labels != null && this.labels.interface != null { this.labels.interface } else { "" },
+            "metric_name": if this.metric_name != null { this.metric_name } else { "" }
           }
         }
         
         # Enhanced severity calculation
-        root.severity = if (this.anomaly_score || 0) > 0.9 {
-          "critical"
-        } else if (this.anomaly_score || 0) > 0.7 {
-          "warning"
-        } else if (this.operational_status || "") == "weather_impacted" || (this.operational_status || "") == "system_overloaded" {
-          "warning"
-        } else if (this.event_source || "") == "application_logs" && (this.level || "") == "ERROR" {
-          "warning"
-        } else {
-          "info"
+        root.severity = "info"
+        if this.anomaly_score != null && this.anomaly_score > 0.9 {
+          root.severity = "critical"
+        } else if this.anomaly_score != null && this.anomaly_score > 0.7 {
+          root.severity = "warning"
+        } else if (this.operational_status != null && this.operational_status == "weather_impacted") || (this.operational_status != null && this.operational_status == "system_overloaded") {
+          root.severity = "warning"
+        } else if this.event_source != null && this.event_source == "application_logs" && this.level != null && this.level == "ERROR" {
+          root.severity = "warning"
         }
               
     # Enhanced deduplication based on source, context, and time window
