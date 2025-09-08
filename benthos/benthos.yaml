@@ -250,27 +250,35 @@ pipeline:
         root.correlated_events = all_events
         
         # Enhanced severity calculation considering all correlated events
-        let severity_priority = match this.severity {
-          "critical" => 4
-          "high" => 3  
-          "medium" => 2
-          _ => 1
-        }
+        let severity_priority = if this.severity != null {
+          match this.severity {
+            "critical" => 4
+            "high" => 3  
+            "warning" => 2
+            "medium" => 2
+            "info" => 1
+            _ => 1
+          }
+        } else { 1 }
         
-        let related_priority = if related != null {
+        let related_priority = if related != null && related.severity != null {
           match related.severity {
             "critical" => 4
             "high" => 3
+            "warning" => 2
             "medium" => 2
+            "info" => 1
             _ => 1
           }
         } else { 0 }
         
-        let secondary_priority = if secondary != null {
+        let secondary_priority = if secondary != null && secondary.severity != null {
           match secondary.severity {
             "critical" => 4
             "high" => 3
+            "warning" => 2
             "medium" => 2
+            "info" => 1
             _ => 1
           }
         } else { 0 }
