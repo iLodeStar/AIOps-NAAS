@@ -925,13 +925,13 @@ start_by_plan() {
   log "docker compose up -d (bootstrap)"
   if [[ "$BUILD_PARALLEL" == "true" ]]; then
     log "Building services in parallel..."
-    dc build --parallel >/dev/null 2>&1 || warn "Parallel build failed, using sequential build"
+    dc build --parallel || warn "Parallel build failed, using sequential build"
   fi
-  dc up -d >/dev/null 2>&1 || true
+  dc up || true
 
   if [[ "$MODE" == "step-by-step" ]]; then
     log "Starting step-by-step interactive mode..."
-    run_step_by_step_mode
+]    run_step_by_step_mode
     compose_snapshot
     log "Step-by-step mode completed."
     exit 0

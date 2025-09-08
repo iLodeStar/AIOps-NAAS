@@ -14,8 +14,8 @@ services:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
@@ -190,8 +190,8 @@ services:
     command: ["--config", "/etc/vector/vector.toml"]
     ports:
       - "8686:8686"         # HTTP API and metrics
-      - "1514:1514/udp"     # UDP syslog port
-      - "1515:1515/tcp"     # TCP syslog port
+      - "1517:1514/udp"     # UDP syslog port
+      - "1516:1515/tcp"     # TCP syslog port
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -256,8 +256,8 @@ services:
       - NATS_URL=nats://nats:4222
       - LOG_LEVEL=INFO
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
     depends_on:
       victoria-metrics:
         condition: service_healthy
@@ -322,7 +322,7 @@ services:
       dockerfile: Dockerfile
     container_name: aiops-enhanced-anomaly-detection
     ports:
-      - "8082:8082"
+      - "9082:9082"
     environment:
       - NATS_URL=nats://nats:4222
       - LOG_LEVEL=INFO
@@ -333,7 +333,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9082/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -371,8 +371,8 @@ services:
       - "8081:8081"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
     depends_on:
       clickhouse:
@@ -470,8 +470,8 @@ services:
       - "8084:8084"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
     depends_on:
       clickhouse:
@@ -496,8 +496,8 @@ services:
       - "8085:8085"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
     depends_on:
       clickhouse:
@@ -522,8 +522,8 @@ services:
       - "8086:8086"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
     depends_on:
       clickhouse:
@@ -583,8 +583,8 @@ services:
       - "8087:8087"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
       - LOG_LEVEL=INFO
     depends_on:
@@ -608,8 +608,8 @@ services:
       - "8089:8089"
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
       - NATS_URL=nats://nats:4222
       - LOG_LEVEL=INFO
     depends_on:

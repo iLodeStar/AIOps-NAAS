@@ -1,31 +1,32 @@
+# vector.toml - Vector v0.49 (Debian)
+
 [api]
 enabled = true
 address = "0.0.0.0:8686"
 
+# ----------------------
+# Sources
+# ----------------------
 [sources.host_metrics]
 type = "host_metrics"
 scrape_interval_secs = 10
 
-# UDP Syslog source (primary)
 [sources.syslog_udp]
 type = "syslog"
 address = "0.0.0.0:1514"
 mode = "udp"
 
-# TCP Syslog source (secondary)
 [sources.syslog_tcp]
 type = "syslog"
-address = "0.0.0.0:1515"
+address = "0.0.0.0:1516"
 mode = "tcp"
 
-# SNMP data from network device collector via NATS
 [sources.snmp_nats]
 type = "nats"
 url = "nats://nats:4222"
 subject = "telemetry.network.>"
 connection_name = "vector-snmp-collector"
 
-# Application logs from application-log-collector via NATS
 [sources.app_logs_nats]
 type = "nats"
 url = "nats://nats:4222"
@@ -37,6 +38,9 @@ type = "file"
 include = ["/var/log/sample/*.log"]
 read_from = "beginning"
 
+# ----------------------
+# Transforms
+# ----------------------
 [transforms.metrics_for_logs]
 type = "metric_to_log"
 inputs = ["host_metrics"]
@@ -45,122 +49,96 @@ inputs = ["host_metrics"]
 type = "remap"
 inputs = ["metrics_for_logs"]
 source = '''
-# Extract metric value from either counter or gauge
 metric_value = if exists(.counter) { .counter.value } else if exists(.gauge) { .gauge.value } else { 0.0 }
 metric_name = .name
 
-# Set required ClickHouse fields with proper error handling  
 .timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
 .source = "host_metrics"
-.message, err = "Metric: " + to_string(metric_name) + " = " + to_string(metric_value)
-if err != null { .message = "Metric processing error" }
-.host, err = to_string(.host)  
-if err != null { .host = "unknown" }
+.message = "Metric: " + to_string!(metric_name) + " = " + to_string!(metric_value)
+.host = to_string!(.host)
 .service = "metrics-collector"
 .raw_log = encode_json(.)
 .labels = if exists(.tags) { .tags } else { {} }
 
-# Clear/set metric-specific fields to match ClickHouse schema
-.name = ""
-.namespace = ""
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
-# Remove original metric structure
 del(.counter)
 del(.gauge)
 '''
 
 [transforms.syslog_for_logs]
-type = "remap"  
+type = "remap"
 inputs = ["syslog_udp", "syslog_tcp"]
 source = '''
-# Ensure timestamp is properly formatted for ClickHouse DateTime64(3)
-.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
+.message = to_string!(.message)
+.timestamp = if exists(.timestamp) {
+    format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
+} else {
+    format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+}
 .level = "INFO"
-.message = .message
 .source = "syslog"
 .host = if exists(.hostname) { .hostname } else { "unknown" }
 .service = if exists(.appname) { .appname } else { "system" }
 .raw_log = encode_json(.)
 .labels = {}
-.name = ""
-.namespace = ""
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
 '''
 
 [transforms.file_logs_processed]
 type = "remap"
 inputs = ["file_logs"]
 source = '''
-# Ensure timestamp is properly formatted for ClickHouse DateTime64(3)
-.timestamp = format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
-.level = .level
-.message = .message
+.message = to_string!(.message)
+.timestamp = if exists(.timestamp) {
+    format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
+} else {
+    format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+}
+.level = if exists(.level) { .level } else { "INFO" }
 .source = "file"
-.host = .host
-.service = .service
+.host = if exists(.host) { .host } else { "unknown" }
+.service = if exists(.service) { .service } else { "file-service" }
 .raw_log = encode_json(.)
 .labels = if exists(.labels) { .labels } else { {} }
-.name = ""
-.namespace = ""
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
 '''
 
 [transforms.snmp_for_logs]
 type = "remap"
 inputs = ["snmp_nats"]
 source = '''
-# Set current timestamp and format for ClickHouse DateTime64(3)
 .timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
-.message = "SNMP: " + to_string(.device_type) + " " + to_string(.device_id) + " - " + to_string(.metric_name) + " = " + to_string(.value)
+
+device_type, err = if exists(.device_type) { to_string(.device_type) } else { "unknown-type" }
+device_id, err = if exists(.device_id) { to_string(.device_id) } else { "unknown-id" }
+metric_name, err = if exists(.metric_name) { to_string(.metric_name) } else { "unknown-metric" }
+value, err = if exists(.value) { to_string(.value) } else { "null" }
+
+.message = "SNMP: " + device_type + " " + device_id + " - " + metric_name + " = " + value
+
 .source = "snmp"
 .host = if exists(.device_ip) { .device_ip } else { "unknown" }
 .service = if exists(.device_type) { .device_type } else { "network-device" }
 .raw_log = encode_json(.)
 .labels = if exists(.labels) { .labels } else { {} }
-.name = ""
-.namespace = ""
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
 '''
 
 [transforms.app_logs_for_logs]
 type = "remap"
 inputs = ["app_logs_nats"]
 source = '''
-# Use provided timestamp or current timestamp and format for ClickHouse DateTime64(3)
-.timestamp = if exists(.timestamp) { 
+.message = to_string!(.message)
+.timestamp = if exists(.timestamp) {
   format_timestamp!(parse_timestamp!(.timestamp, "%Y-%m-%dT%H:%M:%S%.fZ"), "%Y-%m-%d %H:%M:%S%.3f")
-} else { 
+} else {
   format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 }
 .level = if exists(.level) { .level } else { "INFO" }
-.message = .message
 .source = "application"
 .host = if exists(.host) { .host } else { "unknown" }
 .service = if exists(.service) { .service } else { if exists(.application) { .application } else { "app-service" } }
 .raw_log = encode_json(.)
 .labels = if exists(.metadata) { .metadata } else { {} }
-.name = ""
-.namespace = ""
-.tags = {}
-.kind = ""
-.counter_value = null
-.gauge_value = null
 
-# Add application-specific fields to labels
 if exists(.application) { .labels.application = .application }
 if exists(.logger_name) { .labels.logger_name = .logger_name }
 if exists(.trace_id) { .labels.trace_id = .trace_id }
@@ -168,41 +146,34 @@ if exists(.span_id) { .labels.span_id = .span_id }
 if exists(.thread) { .labels.thread = .thread }
 '''
 
-# Enhanced transform to detect and filter anomalous syslog and application logs
+# ----------------------
+# Anomaly detection
+# ----------------------
 [transforms.anomalous_logs_filter]
 type = "filter"
 inputs = ["syslog_for_logs", "app_logs_for_logs"]
 condition = '''
-  (
-    exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
-    exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
-    match_regex!(.message, r"(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency|exception|stack.*trace)")
-  )
+exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
+exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
+(match(to_string!(.message), r'(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency|exception|stack.*trace)') != null)
 '''
 
-# Transform anomalous logs for NATS publication
 [transforms.anomalous_logs_for_nats]
 type = "remap"
 inputs = ["anomalous_logs_filter"]
 source = '''
-# Preserve original fields and add anomaly metadata
 .anomaly_type = "log_pattern"
 .anomaly_detected_at = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 .anomaly_source = "vector_log_filter"
 
-# Extract tracking ID if present
-.tracking_id = if match_regex(.message, r"(TEST-\d{8}-\d{6}-[a-f0-9]+|E2E-\d{8}-\d{6}-[a-f0-9]+)") {
-  string!(get_regex_groups(.message, r"(TEST-\d{8}-\d{6}-[a-f0-9]+|E2E-\d{8}-\d{6}-[a-f0-9]+)")[0])
-} else {
-  null
-}
+.matched = match(to_string!(.message), r'(TEST-[0-9]{8}-[0-9]{6}-[a-f0-9]+|E2E-[0-9]{8}-[0-9]{6}-[a-f0-9]+)')
+.tracking_id = if .matched != null { .matched[0] } else { null }
 
-# Severity mapping for consistency
 .anomaly_severity = if exists(.severity) {
   if (.severity == "emerg" || .severity == "alert" || .severity == "crit") {
     "critical"
   } else if .severity == "err" {
-    "high"  
+    "high"
   } else if .severity == "warning" {
     "medium"
   } else {
@@ -211,9 +182,9 @@ source = '''
 } else if exists(.level) {
   if (.level == "FATAL" || .level == "CRITICAL") {
     "critical"
-  } else if .level == "ERROR" {
+  } else if (.level == "ERROR") {
     "high"
-  } else if .level == "WARN" {
+  } else if (.level == "WARN") {
     "medium"
   } else {
     "low"
@@ -223,73 +194,57 @@ source = '''
 }
 '''
 
+# ----------------------
+# Sinks
+# ----------------------
 [sinks.clickhouse]
 type = "clickhouse"
 inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
 endpoint = "http://clickhouse:8123"
-table = "raw"
 database = "logs"
+table = "raw"
 compression = "gzip"
 skip_unknown_fields = true
 batch.max_events = 100
 batch.timeout_secs = 5
-healthcheck.enabled = true
-request.timeout_secs = 30
-request.retry_attempts = 3
-request.retry_max_duration_secs = 10
 
 [sinks.clickhouse.auth]
 strategy = "basic"
 user = "${CLICKHOUSE_USER:-default}"
 password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
 
-# Send anomalous logs to NATS for real-time anomaly detection
 [sinks.anomalous_logs_nats]
 type = "nats"
 inputs = ["anomalous_logs_for_nats"]
 url = "nats://nats:4222"
 subject = "logs.anomalous"
-encoding.codec = "json"
+[sinks.anomalous_logs_nats.encoding]
+codec = "json"
 
-# Debug sink for syslog messages to verify reception
+# ----------------------
+# Debug sinks
+# ----------------------
 [sinks.syslog_debug]
 type = "console"
 inputs = ["syslog_for_logs"]
-target = "stdout"
-encoding.codec = "json"
+[sinks.syslog_debug.encoding]
+codec = "json"
 
-# Debug sink for raw UDP syslog input
-[sinks.syslog_udp_debug]  
+[sinks.file_debug]
 type = "console"
-inputs = ["syslog_udp"]
-target = "stdout"
-encoding.codec = "json"
+inputs = ["file_logs_processed"]
+[sinks.file_debug.encoding]
+codec = "json"
 
-# Debug sink for raw TCP syslog input
-[sinks.syslog_tcp_debug]
-type = "console"  
-inputs = ["syslog_tcp"]
-target = "stdout"
-encoding.codec = "json"
-
-# Debug sink for SNMP data
 [sinks.snmp_debug]
 type = "console"
 inputs = ["snmp_for_logs"]
-target = "stdout"
-encoding.codec = "json"
+[sinks.snmp_debug.encoding]
+codec = "json"
 
-# Debug sink to see ONLY transformed data
 [sinks.transform_debug]
 type = "console"
 inputs = ["format_for_clickhouse"]
-target = "stderr"
-encoding.codec = "json"
-
-# Raw metrics debug sink to compare input vs output
-[sinks.raw_metrics_debug]
-type = "console"
-inputs = ["metrics_for_logs"]
-target = "stderr"
-encoding.codec = "json"
+[sinks.transform_debug.encoding]
+codec = "json"
 
