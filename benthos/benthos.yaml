@@ -157,13 +157,13 @@ pipeline:
     - cache:
         resource: "correlation_cache"
         operator: "get"  
-        key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_\" } else { \"\" } }"
+        key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_interface\" } else { \"no_correlation_key\" } }"
         
     # Fetch secondary correlation (network during system issues)
     - cache:
         resource: "correlation_cache"
         operator: "get"
-        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\") != null && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"\" } }"
+        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\") != null && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"no_secondary_key\" } }"
         
     # Create comprehensive correlated incidents
     - mapping: |
@@ -255,7 +255,14 @@ pipeline:
         let related_priority = if related == null { 0 } else if related.severity == "critical" { 4 } else if related.severity == "high" { 3 } else if related.severity == "medium" { 2 } else if related.severity == "warning" { 2 } else { 0 }  
         let secondary_priority = if secondary == null { 0 } else if secondary.severity == "critical" { 4 } else if secondary.severity == "high" { 3 } else if secondary.severity == "medium" { 2 } else if secondary.severity == "warning" { 2 } else { 0 }
         
-        let max_priority = [severity_priority, related_priority, secondary_priority].max()
+        # Safely calculate max priority without null values
+        let max_priority = if severity_priority >= related_priority && severity_priority >= secondary_priority { 
+          severity_priority 
+        } else if related_priority >= secondary_priority { 
+          related_priority 
+        } else { 
+          secondary_priority 
+        }
         
         # Debug information for troubleshooting
         root.debug_priorities = {
@@ -292,6 +299,11 @@ pipeline:
           "maritime_context": this.maritime_context || {},
           "operational_status": this.operational_status || "normal",
           "correlation_sources": if this.context_sources != null { this.context_sources } else { [] }
+        }
+        
+        # Ensure incident_type is never null for suppression logic
+        if this.incident_type == null || this.incident_type == "" {
+          root.incident_type = "unknown_anomaly"
         }
         
     # Suppression - check if similar incident exists
