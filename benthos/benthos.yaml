@@ -14,25 +14,25 @@ input:
       - nats:
           urls: ["nats://nats:4222"]
           subject: "anomaly.detected"
-          queue: "correlation_processor_basic"
+          #queue: "correlation_processor_basic"
           
       # Enriched anomaly events from enhanced anomaly detection
       - nats:
           urls: ["nats://nats:4222"]
           subject: "anomaly.detected.enriched"
-          queue: "correlation_processor_enriched"
+          #queue: "correlation_processor_enriched"
           
       # Application log anomalies from application-log-collector
       - nats:
           urls: ["nats://nats:4222"]
           subject: "logs.anomalous"
-          queue: "correlation_processor_app_logs"
+          #queue: "correlation_processor_app_logs"
           
       # SNMP network anomalies
       - nats:
           urls: ["nats://nats:4222"]
           subject: "telemetry.network.anomaly"
-          queue: "correlation_processor_snmp"
+          #queue: "correlation_processor_snmp"
 
 # Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
@@ -132,10 +132,10 @@ pipeline:
         }
               
     # Enhanced deduplication based on source, context, and time window
-    - dedupe:
-        cache: "dedupe_cache"
-        key: "${! json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null { json(\"metric_name\") } else { \"\" }) + \"_\" + json(\"ship_id\") + \"_\" + json(\"service\") }"
-        drop_on_err: false
+    #- dedupe:
+    #    cache: "dedupe_cache"
+    #    key: "${! json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null { json(\"metric_name\") } else { \"\" }) + \"_\" + json(\"ship_id\") + \"_\" + json(\"service\") }"
+    #    drop_on_err: false
         
     # Store events for comprehensive cross-source correlation
     - cache:
@@ -396,6 +396,6 @@ metrics:
   prometheus: {}
     
 logger:
-  level: INFO
+  level: TRACE
   format: json
   add_timestamp: true
