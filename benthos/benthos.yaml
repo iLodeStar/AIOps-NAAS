@@ -55,14 +55,7 @@ pipeline:
         }
         
         # Extract contextual information with safe null handling
-        root.ship_id = "ship-01"
-        if this.labels != null && this.labels.instance != null {
-          root.ship_id = this.labels.instance
-        } else if this.labels != null && this.labels.ship_id != null {
-          root.ship_id = this.labels.ship_id
-        } else if this.host != null {
-          root.ship_id = this.host
-        }
+        root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else if this.labels != null && this.labels.instance != null { this.labels.instance } else if this.labels != null && this.labels.ship_id != null { this.labels.ship_id } else if this.host != null { this.host } else { "ship-01" }
         
         root.service = "unknown"
         if this.labels != null && this.labels.job != null {
@@ -86,6 +79,9 @@ pipeline:
             root.anomaly_score = 0.6
           }
         }
+        
+        # Ensure metric_name is never null for cache key safety
+        root.metric_name = if this.metric_name != null && this.metric_name != "" { this.metric_name } else { "unknown_metric" }
         
         # Handle different event types
         root.is_enriched = false
@@ -119,8 +115,8 @@ pipeline:
           }
         }
         
-        # Enhanced severity calculation
-        root.severity = "info"
+        # Enhanced severity calculation with explicit null safety
+        root.severity = if this.severity != null && this.severity != "" { this.severity } else { "info" }
         if this.anomaly_score != null && this.anomaly_score > 0.9 {
           root.severity = "critical"
         } else if this.anomaly_score != null && this.anomaly_score > 0.7 {
@@ -250,8 +246,9 @@ pipeline:
         root.correlated_events = all_events
         
         # Enhanced severity calculation considering all correlated events  
-        # Use direct numeric calculations to avoid null issues
-        let severity_priority = if this.severity == "critical" { 4 } else if this.severity == "high" { 3 } else if this.severity == "medium" { 2 } else if this.severity == "warning" { 2 } else { 1 }
+        # Use direct numeric calculations to avoid null issues - ensure no null values
+        let current_severity = if this.severity != null { this.severity } else { "info" }
+        let severity_priority = if current_severity == "critical" { 4 } else if current_severity == "high" { 3 } else if current_severity == "medium" { 2 } else if current_severity == "warning" { 2 } else { 1 }
         let related_priority = if related == null { 0 } else if related.severity == "critical" { 4 } else if related.severity == "high" { 3 } else if related.severity == "medium" { 2 } else if related.severity == "warning" { 2 } else { 0 }  
         let secondary_priority = if secondary == null { 0 } else if secondary.severity == "critical" { 4 } else if secondary.severity == "high" { 3 } else if secondary.severity == "medium" { 2 } else if secondary.severity == "warning" { 2 } else { 0 }
         
@@ -264,12 +261,12 @@ pipeline:
           secondary_priority 
         }
         
-        # Debug information for troubleshooting (ensure no null values)
+        # Debug information for troubleshooting (variables are now guaranteed non-null)
         root.debug_priorities = {
-          "severity_priority": if severity_priority != null { severity_priority } else { 0 },
-          "related_priority": if related_priority != null { related_priority } else { 0 }, 
-          "secondary_priority": if secondary_priority != null { secondary_priority } else { 0 },
-          "severity_value": if this.severity != null { this.severity } else { "unknown" },
+          "severity_priority": severity_priority,
+          "related_priority": related_priority, 
+          "secondary_priority": secondary_priority,
+          "severity_value": current_severity,
           "related_exists": related != null,
           "secondary_exists": secondary != null
         }
