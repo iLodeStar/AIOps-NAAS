@@ -141,7 +141,7 @@ pipeline:
     - cache:
         resource: "correlation_cache"  
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null { json(\"metric_name\") } else { \"\" }) }"
+        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + (if json(\"metric_name\") != null && json(\"metric_name\") != \"\" { json(\"metric_name\") } else { \"unknown_metric\" }) }"
         value: "${! content() }"
         ttl: "600s"  # 10 minute correlation window for comprehensive analysis
         
@@ -264,12 +264,12 @@ pipeline:
           secondary_priority 
         }
         
-        # Debug information for troubleshooting
+        # Debug information for troubleshooting (ensure no null values)
         root.debug_priorities = {
-          "severity_priority": severity_priority,
-          "related_priority": related_priority, 
-          "secondary_priority": secondary_priority,
-          "severity_value": this.severity,
+          "severity_priority": if severity_priority != null { severity_priority } else { 0 },
+          "related_priority": if related_priority != null { related_priority } else { 0 }, 
+          "secondary_priority": if secondary_priority != null { secondary_priority } else { 0 },
+          "severity_value": if this.severity != null { this.severity } else { "unknown" },
           "related_exists": related != null,
           "secondary_exists": secondary != null
         }
@@ -304,6 +304,11 @@ pipeline:
         # Ensure incident_type is never null for suppression logic
         if this.incident_type == null || this.incident_type == "" {
           root.incident_type = "unknown_anomaly"
+        }
+        
+        # Ensure ship_id is never null for cache key safety
+        if this.ship_id == null || this.ship_id == "" {
+          root.ship_id = "unknown_ship"
         }
         
     # Suppression - check if similar incident exists
