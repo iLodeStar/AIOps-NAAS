@@ -261,11 +261,11 @@ pipeline:
           secondary_priority 
         }
         
-        # Debug information for troubleshooting (variables are now guaranteed non-null)
+        # Debug information for troubleshooting (defensive null safety for tests)
         root.debug_priorities = {
-          "severity_priority": severity_priority,
-          "related_priority": related_priority, 
-          "secondary_priority": secondary_priority,
+          "severity_priority": if severity_priority != null { severity_priority } else { 0 },
+          "related_priority": if related_priority != null { related_priority } else { 0 }, 
+          "secondary_priority": if secondary_priority != null { secondary_priority } else { 0 },
           "severity_value": current_severity,
           "related_exists": related != null,
           "secondary_exists": secondary != null
