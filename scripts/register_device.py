@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 Interactive Device Registration Script
-Provides a user-friendly CLI for registering hostnames against ships and devices
-with auto-generated device IDs and auto-detection of current system identifiers.
+Provides a user-friendly CLI for registering devices with BOTH hostname AND IP address
+requirements, with auto-generated device IDs and auto-detection of current system identifiers.
+
+IMPORTANT: This service now requires BOTH hostname AND IP address for device registration.
+The registry enforces "hostname AND ip" instead of the previous "hostname OR ip" approach.
 """
 
 import sys
@@ -149,18 +152,19 @@ class DeviceRegistrationCLI:
             print(f"❌ Error creating ship: {e}")
             return False
     
-    def register_device(self, hostname: str, ship_id: str, device_type: str, 
+    def register_device(self, hostname: str, ip_address: str, ship_id: str, device_type: str, 
                        vendor: str = None, model: str = None, location: str = None,
-                       additional_identifiers: List[str] = None) -> Optional[str]:
-        """Register a device and return device_id"""
+                       additional_ip_addresses: List[str] = None) -> Optional[str]:
+        """Register a device with hostname AND IP address and return device_id"""
         device_data = {
             "hostname": hostname,
+            "ip_address": ip_address,
             "ship_id": ship_id,
             "device_type": device_type,
             "vendor": vendor,
             "model": model,
             "location": location,
-            "additional_identifiers": additional_identifiers or []
+            "additional_ip_addresses": additional_ip_addresses or []
         }
         
         try:
@@ -170,7 +174,7 @@ class DeviceRegistrationCLI:
             return result.get("device_id"), result.get("identifiers_registered", [])
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 400:
-                print(f"❌ One or more identifiers already exist or ship '{ship_id}' not found")
+                print(f"❌ Device with this hostname+IP combination already exists or ship '{ship_id}' not found")
             else:
                 print(f"❌ Error registering device: {e}")
             return None, []
@@ -298,16 +302,44 @@ class DeviceRegistrationCLI:
                 print("❌ Hostname is required")
                 return False
         
-        # Handle IP addresses
-        additional_identifiers = []
-        if ip_addresses:
+        # Handle IP addresses - now REQUIRED
+        primary_ip = None
+        additional_ip_addresses = []
+        
+        if not ip_addresses:
+            print("❌ Error: No IP addresses detected. Both hostname AND IP address are required.")
+            manual_ip = input("Please enter the primary IP address manually: ").strip()
+            if not manual_ip:
+                print("❌ IP address is required for device registration")
+                return False
+            primary_ip = manual_ip
+        else:
             print(f"\n📡 Detected IP Addresses:")
             for i, ip in enumerate(ip_addresses, 1):
                 print(f"   {i}. {ip}")
             
-            use_ips = input("\nRegister these IP addresses as additional identifiers? (Y/n): ").strip().lower()
-            if use_ips != 'n':
-                additional_identifiers = ip_addresses
+            if len(ip_addresses) == 1:
+                # Only one IP detected, use as primary
+                primary_ip = ip_addresses[0]
+                print(f"\n✅ Using {primary_ip} as primary IP address")
+            else:
+                # Multiple IPs detected, ask user to select primary
+                while True:
+                    try:
+                        choice = input(f"\nSelect primary IP address (1-{len(ip_addresses)}): ").strip()
+                        ip_idx = int(choice) - 1
+                        if 0 <= ip_idx < len(ip_addresses):
+                            primary_ip = ip_addresses[ip_idx]
+                            # Remaining IPs become additional
+                            additional_ip_addresses = [ip for i, ip in enumerate(ip_addresses) if i != ip_idx]
+                            break
+                        else:
+                            print(f"❌ Invalid selection. Please choose 1-{len(ip_addresses)}")
+                    except ValueError:
+                        print(f"❌ Invalid selection. Please choose 1-{len(ip_addresses)}")
+                    except KeyboardInterrupt:
+                        print("\n❌ Registration cancelled")
+                        return False
         
         # Get ship and device information
         ships = self.list_ships()
@@ -416,9 +448,10 @@ class DeviceRegistrationCLI:
         
         # Summary
         print(f"\n📋 Auto-Registration Summary:")
-        print(f"   Primary Identifier: {hostname}")
-        if additional_identifiers:
-            print(f"   Additional IPs: {', '.join(additional_identifiers)}")
+        print(f"   Hostname: {hostname}")
+        print(f"   Primary IP: {primary_ip}")
+        if additional_ip_addresses:
+            print(f"   Additional IPs: {', '.join(additional_ip_addresses)}")
         print(f"   Ship: {selected_ship}")
         print(f"   Device Type: {device_type}")
         print(f"   Vendor: {vendor or 'Not specified'}")
@@ -428,7 +461,7 @@ class DeviceRegistrationCLI:
         confirm = input("\nRegister this system? (y/N): ").strip().lower()
         if confirm == 'y':
             device_id, registered_identifiers = self.register_device(
-                hostname, selected_ship, device_type, vendor, model, location, additional_identifiers)
+                hostname, primary_ip, selected_ship, device_type, vendor, model, location, additional_ip_addresses)
             if device_id:
                 print(f"✅ System registered successfully!")
                 print(f"   Device ID: {device_id}")
@@ -487,7 +520,8 @@ class DeviceRegistrationCLI:
                 return False
         
         # Device details
-        hostname = input("\nEnter Primary Hostname/IP (e.g., 'ubuntu-vm-01', '192.168.1.100'): ").strip()
+        # Device details - Now require BOTH hostname AND IP
+        hostname = input("\nEnter Hostname (e.g., 'ubuntu-vm-01', 'nav-computer'): ").strip()
         if not hostname:
             print("❌ Hostname is required")
             return False
@@ -501,23 +535,54 @@ class DeviceRegistrationCLI:
             print(f"   Type: {existing['mapping']['device_type']}")
             return False
         
-        # Additional identifiers (IPs, alternate hostnames)
-        additional_identifiers = []
-        add_more = input("\nDo you want to add additional identifiers (IPs, alternate hostnames)? (y/N): ").strip().lower()
+        # Require primary IP address
+        primary_ip = input("Enter Primary IP Address (e.g., '192.168.1.100'): ").strip()
+        if not primary_ip:
+            print("❌ Primary IP address is required")
+            return False
+        
+        # Validate IP format
+        try:
+            import ipaddress
+            ipaddress.ip_address(primary_ip)
+        except ValueError:
+            print(f"❌ Invalid IP address format: {primary_ip}")
+            return False
+        
+        # Check if IP already exists
+        existing_ip = self.lookup_hostname(primary_ip)
+        if existing_ip:
+            print(f"❌ IP address '{primary_ip}' is already registered:")
+            print(f"   Ship: {existing_ip['mapping']['ship_id']} ({existing_ip['mapping']['ship_name']})")
+            print(f"   Device: {existing_ip['mapping']['device_id']}")
+            print(f"   Type: {existing_ip['mapping']['device_type']}")
+            return False
+        
+        # Additional IP addresses (not hostnames anymore)
+        additional_ip_addresses = []
+        add_more = input("\nDo you want to add additional IP addresses? (y/N): ").strip().lower()
         if add_more == 'y':
             while True:
-                additional = input("Enter additional identifier (or press Enter to finish): ").strip()
+                additional = input("Enter additional IP address (or press Enter to finish): ").strip()
                 if not additional:
                     break
-                if additional not in additional_identifiers and additional != hostname:
-                    # Check if this identifier is already registered
+                
+                # Validate IP format
+                try:
+                    ipaddress.ip_address(additional)
+                except ValueError:
+                    print(f"❌ Invalid IP address format: {additional}")
+                    continue
+                    
+                if additional not in additional_ip_addresses and additional not in [hostname, primary_ip]:
+                    # Check if this IP is already registered
                     existing_additional = self.lookup_hostname(additional)
                     if existing_additional:
                         print(f"   ⚠️  '{additional}' is already registered to ship {existing_additional['mapping']['ship_id']}")
                         use_anyway = input("   Continue anyway? (y/N): ").strip().lower()
                         if use_anyway != 'y':
                             continue
-                    additional_identifiers.append(additional)
+                    additional_ip_addresses.append(additional)
                     print(f"   ✅ Added: {additional}")
                 else:
                     print(f"   ⚠️  Skipping duplicate: {additional}")
@@ -571,9 +636,10 @@ class DeviceRegistrationCLI:
         
         # Summary
         print(f"\n📋 Device Registration Summary:")
-        print(f"   Primary Identifier: {hostname}")
-        if additional_identifiers:
-            print(f"   Additional Identifiers: {', '.join(additional_identifiers)}")
+        print(f"   Hostname: {hostname}")
+        print(f"   Primary IP: {primary_ip}")
+        if additional_ip_addresses:
+            print(f"   Additional IPs: {', '.join(additional_ip_addresses)}")
         print(f"   Ship: {selected_ship}")
         print(f"   Device Type: {device_type}")
         print(f"   Vendor: {vendor or 'Not specified'}")
@@ -583,7 +649,7 @@ class DeviceRegistrationCLI:
         confirm = input("\nRegister this device? (y/N): ").strip().lower()
         if confirm == 'y':
             device_id, registered_identifiers = self.register_device(
-                hostname, selected_ship, device_type, vendor, model, location, additional_identifiers)
+                hostname, primary_ip, selected_ship, device_type, vendor, model, location, additional_ip_addresses)
             if device_id:
                 print(f"✅ Device registered successfully!")
                 print(f"   Device ID: {device_id}")
@@ -749,7 +815,9 @@ class DeviceRegistrationCLI:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Interactive Device Registration Script")
+    parser = argparse.ArgumentParser(
+        description="Interactive Device Registration Script - Enforces hostname AND IP address registration"
+    )
     parser.add_argument(
         '--registry-url', 
         default='http://localhost:8081',
@@ -765,15 +833,19 @@ def main():
     )
     parser.add_argument(
         '--hostname',
-        help='Register a hostname (requires --ship-id and --device-type)'
+        help='Device hostname (requires --ip-address, --ship-id and --device-type)'
+    )
+    parser.add_argument(
+        '--ip-address',
+        help='Primary IP address (requires --hostname, --ship-id and --device-type)'
     )
     parser.add_argument(
         '--device-type',
-        help='Device type when registering hostname'
+        help='Device type when registering device'
     )
     parser.add_argument(
         '--lookup',
-        help='Lookup hostname mapping'
+        help='Lookup hostname or IP address mapping'
     )
     parser.add_argument(
         '--list-ships',
@@ -796,9 +868,9 @@ def main():
         help='Auto-detect current system and register interactively'
     )
     parser.add_argument(
-        '--additional-identifiers',
+        '--additional-ip-addresses',
         nargs='*',
-        help='Additional identifiers (IPs, alternate hostnames) when registering hostname'
+        help='Additional IP addresses when registering device'
     )
     
     args = parser.parse_args()
@@ -838,10 +910,10 @@ def main():
             print(f"✅ Ship '{args.ship_id}' created successfully!")
         return
     
-    if args.hostname and args.ship_id and args.device_type:
+    if args.hostname and args.ip_address and args.ship_id and args.device_type:
         device_id, registered_identifiers = cli.register_device(
-            args.hostname, args.ship_id, args.device_type, 
-            additional_identifiers=args.additional_identifiers
+            args.hostname, args.ip_address, args.ship_id, args.device_type, 
+            additional_ip_addresses=args.additional_ip_addresses
         )
         if device_id:
             print(f"✅ Device registered successfully! Device ID: {device_id}")
