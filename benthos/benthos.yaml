@@ -37,6 +37,121 @@ input:
 # Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
   processors:
+    # Input logging and validation for debugging
+    - mapping: |
+        # Log raw input for debugging purposes
+        root.debug_input = {
+          "raw_content": content(),
+          "content_type": content().type(),
+          "timestamp": now(),
+          "metadata": meta()
+        }
+        
+        # Validate and standardize input format
+        if content().type() == "string" {
+          # Try to parse as JSON first, fallback to plain text on failure
+          let is_json = content().length() > 0 && (content().prefix(1) == "{" || content().prefix(1) == "[")
+          root = if is_json {
+            # Attempt JSON parsing
+            if content().parse_json() != null {
+              content().parse_json()
+            } else {
+              # JSON parsing failed, treat as plain text
+              {
+                "message": content(),
+                "level": "INFO",
+                "timestamp": now(),
+                "source": "raw_text",
+                "host": "unknown"
+              }
+            }
+          } else {
+            # Not JSON format, treat as plain text log
+            {
+              "message": content(),
+              "level": "INFO",
+              "timestamp": now(),
+              "source": "raw_text",
+              "host": "unknown"
+            }
+          }
+        } else if content().type() == "object" {
+          # Already an object, use as-is but ensure required fields
+          root = this
+        } else {
+          # Unknown format, wrap in standardized structure
+          root = {
+            "message": content().string(),
+            "level": "INFO", 
+            "timestamp": now(),
+            "source": "unknown_format",
+            "host": "unknown"
+          }
+        }
+        
+        # Ensure critical fields are never null/empty for downstream processing
+        root.ship_id = if this.ship_id != null && this.ship_id != "" { 
+          this.ship_id 
+        } else if this.host != null && this.host != "" { 
+          this.host 
+        } else if this.labels != null && this.labels.instance != null { 
+          this.labels.instance 
+        } else { 
+          "unknown_ship" 
+        }
+        
+        root.event_source = if this.event_source != null && this.event_source != "" { 
+          this.event_source 
+        } else if this.source != null && this.source != "" { 
+          this.source 
+        } else { 
+          "unknown_source" 
+        }
+        
+        root.metric_name = if this.metric_name != null && this.metric_name != "" { 
+          this.metric_name 
+        } else if this.message != null && this.message.contains("CPU") { 
+          "cpu_usage" 
+        } else if this.message != null && this.message.contains("memory") { 
+          "memory_usage" 
+        } else { 
+          "unknown_metric" 
+        }
+        
+        # Standard severity mapping from various log levels
+        root.severity = if this.severity != null && this.severity != "" { 
+          this.severity 
+        } else if this.level != null {
+          if this.level.lowercase() == "error" || this.level.lowercase() == "fatal" {
+            "critical"
+          } else if this.level.lowercase() == "warn" || this.level.lowercase() == "warning" {
+            "warning"  
+          } else if this.level.lowercase() == "info" || this.level.lowercase() == "information" {
+            "info"
+          } else if this.level.lowercase() == "debug" || this.level.lowercase() == "trace" {
+            "debug"
+          } else {
+            "info"
+          }
+        } else {
+          "info"
+        }
+        
+        # Safe incident type handling
+        root.incident_type = if this.incident_type != null && this.incident_type != "" {
+          this.incident_type
+        } else {
+          "unknown_anomaly"
+        }
+        
+        # Add input format metadata
+        root.input_metadata = {
+          "original_format": content().type(),
+          "standardized": true,
+          "validation_timestamp": now(),
+          "processing_stage": "input_validation"
+        }
+    
     # Parse and enrich events from all sources
     - mapping: |
         root.correlation_id = uuid_v4()
