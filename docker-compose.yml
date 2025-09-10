@@ -786,6 +786,32 @@ services:
         max-file: "3"
         max-size: "30m"
 
+  # Device Registry & Mapping Service - Manages hostname → ship_id mappings
+  device-registry:
+    build:
+      context: ./services/device-registry
+      dockerfile: Dockerfile
+    container_name: aiops-device-registry
+    ports:
+      - "8081:8080"  # Device Registry API
+    volumes:
+      - device_registry_data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/device_registry.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
+
 volumes:
   clickhouse_data:
   vm_data:
@@ -797,4 +823,5 @@ volumes:
   vector_data:
   alertmanager_data:
   onboarding_data:
+  device_registry_data:
   

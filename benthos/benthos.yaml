@@ -37,6 +37,204 @@ input:
 # Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
   processors:
+    # Input logging and validation for debugging
+    - mapping: |
+        # Log raw input for debugging purposes
+        root.debug_input = {
+          "raw_content": content(),
+          "content_type": content().type(),
+          "timestamp": now(),
+          "metadata": meta()
+        }
+        
+        # Validate and standardize input format
+        if content().type() == "string" {
+          # Try to parse as JSON first, fallback to plain text on failure
+          let is_json = content().length() > 0 && (content().prefix(1) == "{" || content().prefix(1) == "[")
+          root = if is_json {
+            # Attempt JSON parsing
+            if content().parse_json() != null {
+              content().parse_json()
+            } else {
+              # JSON parsing failed, treat as plain text
+              {
+                "message": content(),
+                "level": "INFO",
+                "timestamp": now(),
+                "source": "raw_text",
+                "host": "unknown"
+              }
+            }
+          } else {
+            # Not JSON format, treat as plain text log
+            {
+              "message": content(),
+              "level": "INFO",
+              "timestamp": now(),
+              "source": "raw_text",
+              "host": "unknown"
+            }
+          }
+        } else if content().type() == "object" {
+          # Already an object, use as-is but ensure required fields
+          root = this
+        } else {
+          # Unknown format, wrap in standardized structure
+          root = {
+            "message": content().string(),
+            "level": "INFO", 
+            "timestamp": now(),
+            "source": "unknown_format",
+            "host": "unknown"
+          }
+        }
+        
+        # Ensure critical fields are never null/empty for downstream processing
+        root.ship_id = if this.ship_id != null && this.ship_id != "" { 
+          this.ship_id 
+        } else if this.host != null && this.host != "" { 
+          this.host 
+        } else if this.labels != null && this.labels.instance != null { 
+          this.labels.instance 
+        } else { 
+          "unknown_ship" 
+        }
+        
+        root.event_source = if this.event_source != null && this.event_source != "" { 
+          this.event_source 
+        } else if this.source != null && this.source != "" { 
+          this.source 
+        } else { 
+          "unknown_source" 
+        }
+        
+        root.metric_name = if this.metric_name != null && this.metric_name != "" { 
+          this.metric_name 
+        } else if this.message != null && this.message.contains("CPU") { 
+          "cpu_usage" 
+        } else if this.message != null && this.message.contains("memory") { 
+          "memory_usage" 
+        } else { 
+          "unknown_metric" 
+        }
+        
+        # Standard severity mapping from various log levels
+        root.severity = if this.severity != null && this.severity != "" { 
+          this.severity 
+        } else if this.level != null {
+          if this.level.lowercase() == "error" || this.level.lowercase() == "fatal" {
+            "critical"
+          } else if this.level.lowercase() == "warn" || this.level.lowercase() == "warning" {
+            "warning"  
+          } else if this.level.lowercase() == "info" || this.level.lowercase() == "information" {
+            "info"
+          } else if this.level.lowercase() == "debug" || this.level.lowercase() == "trace" {
+            "debug"
+          } else {
+            "info"
+          }
+        } else {
+          "info"
+        }
+        
+        # Safe incident type handling
+        root.incident_type = if this.incident_type != null && this.incident_type != "" {
+          this.incident_type
+        } else {
+          "unknown_anomaly"
+        }
+        
+        # Add input format metadata
+        root.input_metadata = {
+          "original_format": content().type(),
+          "standardized": true,
+          "validation_timestamp": now(),
+          "processing_stage": "input_validation"
+        }
+    
+    # Device Registry Integration - Enhanced ship_id resolution
+    - mapping: |
+        # Enhanced ship_id resolution using Device Registry service
+        root.original_ship_id = this.ship_id
+        root.original_host = this.host
+        root.registry_lookup_attempted = false
+        root.registry_lookup_success = false
+        
+        # First check if we already have a valid ship_id
+        if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+          # Valid ship_id already exists, keep it
+          root.ship_id = this.ship_id
+          root.ship_id_source = "original_field"
+        } else {
+          # Need to resolve ship_id via registry lookup
+          root.registry_lookup_attempted = true
+          
+          # Try hostname-based lookup via Device Registry
+          let hostname = if this.host != null && this.host != "" { 
+            this.host 
+          } else if this.labels != null && this.labels.instance != null { 
+            this.labels.instance 
+          } else if this.hostname != null && this.hostname != "" {
+            this.hostname
+          } else {
+            null
+          }
+          
+          if hostname != null {
+            # Perform HTTP lookup to Device Registry with timeout and error handling
+            let registry_url = "http://device-registry:8080/lookup/" + hostname.url_encode()
+            
+            # Try registry lookup with fallback on error
+            try {
+              let lookup_result = registry_url.http_get(headers: {"Accept": "application/json"}, timeout: "2s").parse_json()
+              if lookup_result.success {
+                root.ship_id = lookup_result.mapping.ship_id
+                root.device_id = lookup_result.mapping.device_id  
+                root.device_type = lookup_result.mapping.device_type
+                root.ship_name = lookup_result.mapping.ship_name
+                root.device_vendor = lookup_result.mapping.vendor
+                root.device_model = lookup_result.mapping.model
+                root.device_location = lookup_result.mapping.location
+                root.ship_id_source = "device_registry"
+                root.registry_lookup_success = true
+              } else {
+                # Registry lookup returned not found, use smart fallback
+                root.ship_id = if hostname.contains("-") { 
+                  hostname.split("-")[0] + "-ship"
+                } else { 
+                  "unknown-ship" 
+                }
+                root.ship_id_source = "hostname_derived"
+              }
+            } catch error {
+              # Registry service unavailable or timeout, use intelligent fallback  
+              root.ship_id = if hostname.contains("-") {
+                hostname.split("-")[0] + "-ship"
+              } else if hostname.starts_with("192.168.") || hostname.starts_with("10.") {
+                "network-device-" + hostname.split(".")[2]
+              } else {
+                "unknown-ship"
+              }
+              root.ship_id_source = "fallback"
+              root.registry_error = error
+            }
+          } else {
+            # No hostname available, use ultimate fallback
+            root.ship_id = "unknown-ship"
+            root.ship_id_source = "no_hostname"
+          }
+        }
+        
+        # Add registry lookup metadata for debugging and monitoring
+        root.registry_metadata = {
+          "lookup_attempted": root.registry_lookup_attempted,
+          "lookup_success": root.registry_lookup_success,
+          "ship_id_source": root.ship_id_source,
+          "original_host": root.original_host,
+          "resolved_ship_id": root.ship_id,
+          "timestamp": now()
+        }
+
     # Parse and enrich events from all sources
     - mapping: |
         root.correlation_id = uuid_v4()
@@ -55,7 +253,13 @@ pipeline:
         }
         
         # Extract contextual information with safe null handling
-        root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else if this.labels != null && this.labels.instance != null { this.labels.instance } else if this.labels != null && this.labels.ship_id != null { this.labels.ship_id } else if this.host != null { this.host } else { "ship-01" }
+        # ship_id is now resolved by Device Registry lookup above, no fallback needed
+        # Preserve the resolved ship_id from registry processor
+        if this.ship_id == null || this.ship_id == "" {
+          root.ship_id = "unknown-ship"  # Final safety net
+        } else {
+          root.ship_id = this.ship_id
+        }
         
         root.service = "unknown"
         if this.labels != null && this.labels.job != null {
