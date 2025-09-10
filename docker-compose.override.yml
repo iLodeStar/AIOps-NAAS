@@ -15,11 +15,21 @@ services:
       - GF_AUTH_GENERIC_OAUTH_TOKEN_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/token
       - GF_AUTH_GENERIC_OAUTH_API_URL=${KC_BASE_URL:-http://localhost:8089}/realms/${KC_REALM_NAME:-AIOPS}/protocol/openid-connect/userinfo
       - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://localhost:3000/}
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   clickhouse:
     environment:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Node Exporter - Override for WSL2/private-root mount compatibility
   node-exporter:
@@ -37,6 +47,11 @@ services:
       - '--collector.filesystem'
       - '--collector.loadavg'
       - '--collector.time'
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   vector:
     image: timberio/vector:0.49.0-debian
@@ -51,3 +66,8 @@ services:
       - VECTOR_LOG=trace
     ports:
       - "8686:8686"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
