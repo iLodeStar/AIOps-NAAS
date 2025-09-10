@@ -154,12 +154,14 @@ pipeline:
         resource: "correlation_cache"
         operator: "get"  
         key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_interface\" } else { \"no_correlation_key\" } }"
+        drop_on_err: true
         
     # Fetch secondary correlation (network during system issues)
     - cache:
         resource: "correlation_cache"
         operator: "get"
         key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\") != null && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"no_secondary_key\" } }"
+        drop_on_err: true
         
     # Create comprehensive correlated incidents
     - mapping: |
@@ -249,8 +251,8 @@ pipeline:
         # Use direct numeric calculations to avoid null issues - ensure no null values
         let current_severity = if this.severity != null { this.severity } else { "info" }
         let severity_priority = if current_severity == "critical" { 4 } else if current_severity == "high" { 3 } else if current_severity == "medium" { 2 } else if current_severity == "warning" { 2 } else { 1 }
-        let related_priority = if related == null { 0 } else if related.severity == "critical" { 4 } else if related.severity == "high" { 3 } else if related.severity == "medium" { 2 } else if related.severity == "warning" { 2 } else { 0 }  
-        let secondary_priority = if secondary == null { 0 } else if secondary.severity == "critical" { 4 } else if secondary.severity == "high" { 3 } else if secondary.severity == "medium" { 2 } else if secondary.severity == "warning" { 2 } else { 0 }
+        let related_priority = if related == null { 0 } else if related.severity != null && related.severity == "critical" { 4 } else if related.severity != null && related.severity == "high" { 3 } else if related.severity != null && related.severity == "medium" { 2 } else if related.severity != null && related.severity == "warning" { 2 } else { 0 }  
+        let secondary_priority = if secondary == null { 0 } else if secondary.severity != null && secondary.severity == "critical" { 4 } else if secondary.severity != null && secondary.severity == "high" { 3 } else if secondary.severity != null && secondary.severity == "medium" { 2 } else if secondary.severity != null && secondary.severity == "warning" { 2 } else { 0 }
         
         # Safely calculate max priority without null values
         let max_priority = if severity_priority >= related_priority && severity_priority >= secondary_priority { 
@@ -312,7 +314,8 @@ pipeline:
     - cache:
         resource: "suppression_cache"
         operator: "get"
-        key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
+        key: "${! (if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_anomaly\" }) + \"_\" + (if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown_ship\" }) }"
+        drop_on_err: true
         
     # Only process if not suppressed
     - switch:
@@ -322,7 +325,7 @@ pipeline:
           - cache:
               resource: "suppression_cache"
               operator: "set" 
-              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
+              key: "${! (if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_anomaly\" }) + \"_\" + (if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown_ship\" }) }"
               value: "suppressed"
               ttl: "300s"  # Suppress for 5 minutes
               
