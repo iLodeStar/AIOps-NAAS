@@ -46,12 +46,13 @@ class HostnameMapping(BaseModel):
 
 
 class RegistrationRequest(BaseModel):
-    hostname: str = Field(..., description="Hostname or IP to register")
+    hostname: str = Field(..., description="Primary hostname or IP to register")
     ship_id: str = Field(..., description="Ship to associate with")
     device_type: str = Field(..., description="Type of device")
     vendor: Optional[str] = Field(None, description="Device vendor")
     model: Optional[str] = Field(None, description="Device model")
     location: Optional[str] = Field(None, description="Location on ship")
+    additional_identifiers: Optional[List[str]] = Field(default=[], description="Additional hostnames/IPs for this device")
 
 
 # Database management
@@ -138,8 +139,8 @@ class DeviceRegistryDB:
 
     def register_device(self, hostname: str, ship_id: str, device_type: str,
                        vendor: Optional[str] = None, model: Optional[str] = None,
-                       location: Optional[str] = None) -> Optional[str]:
-        """Register a new device and create hostname mapping"""
+                       location: Optional[str] = None, additional_identifiers: Optional[List[str]] = None) -> Optional[str]:
+        """Register a new device and create hostname mapping(s)"""
         device_id = f"dev_{uuid.uuid4().hex[:12]}"
         
         try:
@@ -150,11 +151,20 @@ class DeviceRegistryDB:
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (device_id, hostname, ship_id, device_type, vendor, model, location))
                 
-                # Insert hostname mapping
+                # Insert primary hostname mapping
                 conn.execute("""
                     INSERT OR REPLACE INTO hostname_mappings (hostname, ship_id, device_id, device_type, last_seen)
                     VALUES (?, ?, ?, ?, ?)
                 """, (hostname, ship_id, device_id, device_type, datetime.utcnow()))
+                
+                # Insert additional identifier mappings (e.g., IP addresses)
+                if additional_identifiers:
+                    for identifier in additional_identifiers:
+                        if identifier and identifier != hostname:  # Avoid duplicates
+                            conn.execute("""
+                                INSERT OR REPLACE INTO hostname_mappings (hostname, ship_id, device_id, device_type, last_seen)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (identifier, ship_id, device_id, device_type, datetime.utcnow()))
                 
                 conn.commit()
                 return device_id
@@ -162,20 +172,45 @@ class DeviceRegistryDB:
             return None
 
     def lookup_hostname(self, hostname: str) -> Optional[Dict[str, Any]]:
-        """Lookup ship_id and device info by hostname"""
+        """Lookup ship_id and device info by hostname or IP address"""
         with self.get_connection() as conn:
+            # First try exact match
             result = conn.execute("""
                 SELECT hm.ship_id, hm.device_id, hm.device_type, 
-                       d.vendor, d.model, d.location, s.name as ship_name
+                       d.vendor, d.model, d.location, s.name as ship_name,
+                       hm.hostname as matched_identifier
                 FROM hostname_mappings hm
                 JOIN devices d ON hm.device_id = d.device_id
                 JOIN ships s ON hm.ship_id = s.ship_id
                 WHERE hm.hostname = ?
             """, (hostname,)).fetchone()
             
+            # If no exact match and input looks like IP, try to find by device hostname pattern
+            if not result and self._is_ip_address(hostname):
+                # Try to find devices where hostname contains this IP or similar pattern
+                result = conn.execute("""
+                    SELECT hm.ship_id, hm.device_id, hm.device_type, 
+                           d.vendor, d.model, d.location, s.name as ship_name,
+                           hm.hostname as matched_identifier
+                    FROM hostname_mappings hm
+                    JOIN devices d ON hm.device_id = d.device_id
+                    JOIN ships s ON hm.ship_id = s.ship_id
+                    WHERE hm.hostname LIKE ? OR d.hostname LIKE ?
+                    LIMIT 1
+                """, (f"%{hostname}%", f"%{hostname}%")).fetchone()
+            
             if result:
                 return dict(result)
             return None
+
+    def _is_ip_address(self, hostname: str) -> bool:
+        """Check if the hostname string looks like an IP address"""
+        try:
+            import ipaddress
+            ipaddress.ip_address(hostname)
+            return True
+        except ValueError:
+            return False
 
     def update_last_seen(self, hostname: str):
         """Update last_seen timestamp for hostname"""
@@ -211,7 +246,27 @@ class DeviceRegistryDB:
                     JOIN ships s ON d.ship_id = s.ship_id
                     ORDER BY d.ship_id, d.device_type, d.hostname
                 """, ).fetchall()
-            return [dict(row) for row in results]
+            
+            # Enrich with all identifiers for each device
+            devices = []
+            for row in results:
+                device = dict(row)
+                # Get all identifiers for this device
+                identifiers = conn.execute("""
+                    SELECT hostname FROM hostname_mappings WHERE device_id = ?
+                """, (device['device_id'],)).fetchall()
+                device['all_identifiers'] = [id_row['hostname'] for id_row in identifiers]
+                devices.append(device)
+            
+            return devices
+
+    def get_device_identifiers(self, device_id: str) -> List[str]:
+        """Get all identifiers (hostnames/IPs) for a device"""
+        with self.get_connection() as conn:
+            results = conn.execute("""
+                SELECT hostname FROM hostname_mappings WHERE device_id = ?
+            """, (device_id,)).fetchall()
+            return [row['hostname'] for row in results]
 
 
 # FastAPI app
@@ -254,26 +309,29 @@ async def list_ships(db: DeviceRegistryDB = Depends(get_db)):
 
 @app.post("/devices/register", response_model=Dict[str, Any])
 async def register_device(request: RegistrationRequest, db: DeviceRegistryDB = Depends(get_db)):
-    """Register a new device with hostname mapping"""
+    """Register a new device with hostname mapping and optional additional identifiers"""
     device_id = db.register_device(
         hostname=request.hostname,
         ship_id=request.ship_id,
         device_type=request.device_type,
         vendor=request.vendor,
         model=request.model,
-        location=request.location
+        location=request.location,
+        additional_identifiers=request.additional_identifiers
     )
     
     if device_id:
+        identifiers_registered = [request.hostname] + (request.additional_identifiers or [])
         return {
             "success": True,
             "device_id": device_id,
             "hostname": request.hostname,
             "ship_id": request.ship_id,
-            "message": "Device registered successfully"
+            "identifiers_registered": identifiers_registered,
+            "message": f"Device registered successfully with {len(identifiers_registered)} identifier(s)"
         }
     else:
-        raise HTTPException(status_code=400, detail="Hostname already exists or ship_id not found")
+        raise HTTPException(status_code=400, detail="One or more identifiers already exist or ship_id not found")
 
 
 @app.get("/devices", response_model=List[Dict[str, Any]])
@@ -307,6 +365,21 @@ async def update_last_seen(hostname: str, db: DeviceRegistryDB = Depends(get_db)
         return {"success": True, "hostname": hostname, "last_seen": datetime.utcnow()}
     else:
         raise HTTPException(status_code=404, detail="Hostname not found in registry")
+
+
+@app.get("/devices/{device_id}/identifiers", response_model=Dict[str, Any])
+async def get_device_identifiers(device_id: str, db: DeviceRegistryDB = Depends(get_db)):
+    """Get all identifiers (hostnames/IPs) for a device"""
+    identifiers = db.get_device_identifiers(device_id)
+    if identifiers:
+        return {
+            "success": True,
+            "device_id": device_id,
+            "identifiers": identifiers,
+            "count": len(identifiers)
+        }
+    else:
+        raise HTTPException(status_code=404, detail="Device not found")
 
 
 @app.get("/stats", response_model=Dict[str, Any])

@@ -2,15 +2,101 @@
 """
 Interactive Device Registration Script
 Provides a user-friendly CLI for registering hostnames against ships and devices
-with auto-generated device IDs.
+with auto-generated device IDs and auto-detection of current system identifiers.
 """
 
 import sys
 import json
 import requests
-from typing import Dict, List, Optional
+import socket
+import subprocess
+import platform
+from typing import Dict, List, Optional, Tuple
 import argparse
 from datetime import datetime
+
+
+def get_system_identifiers() -> Tuple[str, List[str]]:
+    """Auto-detect current system hostname and IP addresses"""
+    try:
+        # Get hostname
+        hostname = socket.gethostname()
+        
+        # Get IP addresses
+        ip_addresses = []
+        
+        # Method 1: Use socket to get primary IP
+        try:
+            # Connect to external address to get local IP (doesn't actually connect)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            primary_ip = s.getsockname()[0]
+            s.close()
+            if primary_ip and primary_ip != "127.0.0.1":
+                ip_addresses.append(primary_ip)
+        except:
+            pass
+        
+        # Method 2: Try to get interface IPs based on OS
+        try:
+            if platform.system() == "Linux":
+                # Use ip command on Linux
+                result = subprocess.run(['ip', 'route', 'get', '8.8.8.8'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if 'src' in line:
+                            parts = line.split()
+                            try:
+                                ip_idx = parts.index('src') + 1
+                                if ip_idx < len(parts):
+                                    ip = parts[ip_idx]
+                                    if ip not in ip_addresses and ip != "127.0.0.1":
+                                        ip_addresses.append(ip)
+                            except:
+                                pass
+            elif platform.system() == "Darwin":  # macOS
+                # Use route command on macOS
+                result = subprocess.run(['route', 'get', 'default'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'interface:' in line:
+                            interface = line.split(':')[-1].strip()
+                            # Get IP for this interface
+                            try:
+                                import subprocess
+                                ip_result = subprocess.run(['ifconfig', interface], 
+                                                         capture_output=True, text=True, timeout=5)
+                                for ip_line in ip_result.stdout.split('\n'):
+                                    if 'inet ' in ip_line and 'inet 127.' not in ip_line:
+                                        ip = ip_line.split()[1]
+                                        if ip not in ip_addresses:
+                                            ip_addresses.append(ip)
+                            except:
+                                pass
+        except:
+            pass
+        
+        # Method 3: Fallback - get all addresses for hostname
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+            for info in addr_info:
+                ip = info[4][0]
+                if ip not in ip_addresses and ip != "127.0.0.1" and not ip.startswith("::"):
+                    ip_addresses.append(ip)
+        except:
+            pass
+        
+        # Remove duplicates and sort
+        ip_addresses = list(dict.fromkeys(ip_addresses))  # Remove duplicates preserving order
+        
+        return hostname, ip_addresses
+        
+    except Exception as e:
+        print(f"Warning: Could not auto-detect system identifiers: {e}")
+        return "unknown", []
 
 
 class DeviceRegistrationCLI:
@@ -64,7 +150,8 @@ class DeviceRegistrationCLI:
             return False
     
     def register_device(self, hostname: str, ship_id: str, device_type: str, 
-                       vendor: str = None, model: str = None, location: str = None) -> Optional[str]:
+                       vendor: str = None, model: str = None, location: str = None,
+                       additional_identifiers: List[str] = None) -> Optional[str]:
         """Register a device and return device_id"""
         device_data = {
             "hostname": hostname,
@@ -72,23 +159,24 @@ class DeviceRegistrationCLI:
             "device_type": device_type,
             "vendor": vendor,
             "model": model,
-            "location": location
+            "location": location,
+            "additional_identifiers": additional_identifiers or []
         }
         
         try:
             response = self.session.post(f"{self.registry_url}/devices/register", json=device_data)
             response.raise_for_status()
             result = response.json()
-            return result.get("device_id")
+            return result.get("device_id"), result.get("identifiers_registered", [])
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 400:
-                print(f"❌ Hostname '{hostname}' already exists or ship '{ship_id}' not found")
+                print(f"❌ One or more identifiers already exist or ship '{ship_id}' not found")
             else:
                 print(f"❌ Error registering device: {e}")
-            return None
+            return None, []
         except Exception as e:
             print(f"❌ Error registering device: {e}")
-            return None
+            return None, []
     
     def lookup_hostname(self, hostname: str) -> Optional[Dict]:
         """Lookup hostname mapping"""
@@ -165,6 +253,193 @@ class DeviceRegistrationCLI:
             print("❌ Ship creation cancelled")
             return False
     
+    def auto_register_current_system(self):
+        """Auto-detect current system and register it interactively"""
+        print("\n🖥️  Auto-Register Current System")
+        print("=" * 50)
+        
+        # Detect current system identifiers
+        print("🔍 Detecting current system identifiers...")
+        hostname, ip_addresses = get_system_identifiers()
+        
+        print(f"\n📋 Detected System Information:")
+        print(f"   Hostname: {hostname}")
+        if ip_addresses:
+            print(f"   IP Addresses: {', '.join(ip_addresses)}")
+        else:
+            print(f"   IP Addresses: None detected")
+        
+        # Check if already registered
+        existing_hostname = self.lookup_hostname(hostname)
+        existing_ips = []
+        for ip in ip_addresses:
+            existing_ip = self.lookup_hostname(ip)
+            if existing_ip:
+                existing_ips.append((ip, existing_ip))
+        
+        if existing_hostname or existing_ips:
+            print(f"\n⚠️  System Already Registered:")
+            if existing_hostname:
+                mapping = existing_hostname['mapping']
+                print(f"   Hostname '{hostname}' → Ship: {mapping['ship_id']} ({mapping['ship_name']})")
+                print(f"   Device: {mapping['device_id']} ({mapping['device_type']})")
+            
+            for ip, mapping_info in existing_ips:
+                mapping = mapping_info['mapping']
+                print(f"   IP '{ip}' → Ship: {mapping['ship_id']} ({mapping['ship_name']})")
+                print(f"   Device: {mapping['device_id']} ({mapping['device_type']})")
+            return False
+        
+        # Confirm detected information
+        use_detected = input(f"\nUse detected hostname '{hostname}'? (Y/n): ").strip().lower()
+        if use_detected == 'n':
+            hostname = input("Enter hostname manually: ").strip()
+            if not hostname:
+                print("❌ Hostname is required")
+                return False
+        
+        # Handle IP addresses
+        additional_identifiers = []
+        if ip_addresses:
+            print(f"\n📡 Detected IP Addresses:")
+            for i, ip in enumerate(ip_addresses, 1):
+                print(f"   {i}. {ip}")
+            
+            use_ips = input("\nRegister these IP addresses as additional identifiers? (Y/n): ").strip().lower()
+            if use_ips != 'n':
+                additional_identifiers = ip_addresses
+        
+        # Get ship and device information
+        ships = self.list_ships()
+        if not ships:
+            print("❌ No ships found. Please create a ship first.")
+            create_ship = input("Would you like to create a ship now? (y/N): ").strip().lower()
+            if create_ship == 'y':
+                if self.interactive_ship_creation():
+                    ships = self.list_ships()
+                else:
+                    return False
+            else:
+                return False
+        
+        print(f"\n📋 Available Ships:")
+        for i, ship in enumerate(ships, 1):
+            print(f"   {i}. {ship['ship_id']} - {ship['name']}")
+        
+        # Ship selection
+        while True:
+            try:
+                ship_choice = input(f"\nSelect ship (1-{len(ships)}) or enter ship_id directly: ").strip()
+                
+                # Try to parse as number first
+                try:
+                    ship_idx = int(ship_choice) - 1
+                    if 0 <= ship_idx < len(ships):
+                        selected_ship = ships[ship_idx]['ship_id']
+                        break
+                except ValueError:
+                    pass
+                
+                # Try as direct ship_id
+                if any(ship['ship_id'] == ship_choice for ship in ships):
+                    selected_ship = ship_choice
+                    break
+                else:
+                    print(f"❌ Invalid selection. Please choose 1-{len(ships)} or valid ship_id")
+            except KeyboardInterrupt:
+                print("\n❌ Registration cancelled")
+                return False
+        
+        # Device type selection
+        print(f"\n📱 Device Type Categories:")
+        device_types = [
+            "workstation",    # User workstations, terminals, laptops
+            "server",         # Application servers, databases, file servers  
+            "network",        # Switches, routers, wireless access points
+            "navigation",     # GPS, radar, AIS, chart plotters
+            "communication",  # VHF, satellite communication, intercom
+            "engine",         # Engine monitoring, propulsion systems
+            "safety",         # Fire detection, emergency systems, life safety
+            "iot_sensor",     # Temperature, humidity, pressure sensors
+            "security",       # CCTV, access control, alarm systems
+            "other"           # Miscellaneous devices
+        ]
+        
+        for i, dtype in enumerate(device_types, 1):
+            print(f"   {i:2d}. {dtype}")
+        
+        # Auto-suggest device type based on hostname
+        suggested_type = "workstation"  # Default suggestion
+        hostname_lower = hostname.lower()
+        if any(term in hostname_lower for term in ["server", "srv", "db", "database"]):
+            suggested_type = "server"
+        elif any(term in hostname_lower for term in ["switch", "router", "ap", "wifi"]):
+            suggested_type = "network"
+        elif any(term in hostname_lower for term in ["vm", "desktop", "laptop", "pc"]):
+            suggested_type = "workstation"
+        
+        print(f"\n💡 Suggested device type based on hostname: {suggested_type}")
+        
+        while True:
+            try:
+                type_choice = input(f"\nSelect device type (1-{len(device_types)}) or enter type directly [suggested: {suggested_type}]: ").strip()
+                
+                if not type_choice:  # Use suggestion
+                    device_type = suggested_type
+                    break
+                
+                # Try to parse as number first
+                try:
+                    type_idx = int(type_choice) - 1
+                    if 0 <= type_idx < len(device_types):
+                        device_type = device_types[type_idx]
+                        break
+                except ValueError:
+                    pass
+                
+                # Use direct input
+                device_type = type_choice
+                break
+            except KeyboardInterrupt:
+                print("\n❌ Registration cancelled")
+                return False
+        
+        # Optional details
+        vendor = input("Enter Vendor/Manufacturer (optional, press Enter to skip): ").strip()
+        vendor = vendor if vendor else None
+        
+        model = input("Enter Model (optional, press Enter to skip): ").strip()
+        model = model if model else None
+        
+        location = input("Enter Location on Ship (optional, e.g., 'Bridge', 'Engine Room'): ").strip()
+        location = location if location else None
+        
+        # Summary
+        print(f"\n📋 Auto-Registration Summary:")
+        print(f"   Primary Identifier: {hostname}")
+        if additional_identifiers:
+            print(f"   Additional IPs: {', '.join(additional_identifiers)}")
+        print(f"   Ship: {selected_ship}")
+        print(f"   Device Type: {device_type}")
+        print(f"   Vendor: {vendor or 'Not specified'}")
+        print(f"   Model: {model or 'Not specified'}")
+        print(f"   Location: {location or 'Not specified'}")
+        
+        confirm = input("\nRegister this system? (y/N): ").strip().lower()
+        if confirm == 'y':
+            device_id, registered_identifiers = self.register_device(
+                hostname, selected_ship, device_type, vendor, model, location, additional_identifiers)
+            if device_id:
+                print(f"✅ System registered successfully!")
+                print(f"   Device ID: {device_id}")
+                print(f"   Registered Identifiers: {', '.join(registered_identifiers)}")
+                print(f"   Ship: {selected_ship}")
+                return True
+            else:
+                return False
+        else:
+            print("❌ Auto-registration cancelled")
+            return False
     def interactive_device_registration(self):
         """Interactive device registration wizard"""
         print("\n🖥️  Device Registration Wizard")
@@ -212,7 +487,7 @@ class DeviceRegistrationCLI:
                 return False
         
         # Device details
-        hostname = input("\nEnter Hostname/IP (e.g., 'ubuntu-vm-01', '192.168.1.100'): ").strip()
+        hostname = input("\nEnter Primary Hostname/IP (e.g., 'ubuntu-vm-01', '192.168.1.100'): ").strip()
         if not hostname:
             print("❌ Hostname is required")
             return False
@@ -225,6 +500,27 @@ class DeviceRegistrationCLI:
             print(f"   Device: {existing['mapping']['device_id']}")
             print(f"   Type: {existing['mapping']['device_type']}")
             return False
+        
+        # Additional identifiers (IPs, alternate hostnames)
+        additional_identifiers = []
+        add_more = input("\nDo you want to add additional identifiers (IPs, alternate hostnames)? (y/N): ").strip().lower()
+        if add_more == 'y':
+            while True:
+                additional = input("Enter additional identifier (or press Enter to finish): ").strip()
+                if not additional:
+                    break
+                if additional not in additional_identifiers and additional != hostname:
+                    # Check if this identifier is already registered
+                    existing_additional = self.lookup_hostname(additional)
+                    if existing_additional:
+                        print(f"   ⚠️  '{additional}' is already registered to ship {existing_additional['mapping']['ship_id']}")
+                        use_anyway = input("   Continue anyway? (y/N): ").strip().lower()
+                        if use_anyway != 'y':
+                            continue
+                    additional_identifiers.append(additional)
+                    print(f"   ✅ Added: {additional}")
+                else:
+                    print(f"   ⚠️  Skipping duplicate: {additional}")
         
         print(f"\n📱 Device Type Categories:")
         device_types = [
@@ -275,7 +571,9 @@ class DeviceRegistrationCLI:
         
         # Summary
         print(f"\n📋 Device Registration Summary:")
-        print(f"   Hostname: {hostname}")
+        print(f"   Primary Identifier: {hostname}")
+        if additional_identifiers:
+            print(f"   Additional Identifiers: {', '.join(additional_identifiers)}")
         print(f"   Ship: {selected_ship}")
         print(f"   Device Type: {device_type}")
         print(f"   Vendor: {vendor or 'Not specified'}")
@@ -284,11 +582,13 @@ class DeviceRegistrationCLI:
         
         confirm = input("\nRegister this device? (y/N): ").strip().lower()
         if confirm == 'y':
-            device_id = self.register_device(hostname, selected_ship, device_type, vendor, model, location)
+            device_id, registered_identifiers = self.register_device(
+                hostname, selected_ship, device_type, vendor, model, location, additional_identifiers)
             if device_id:
                 print(f"✅ Device registered successfully!")
                 print(f"   Device ID: {device_id}")
-                print(f"   Hostname: {hostname} → Ship: {selected_ship}")
+                print(f"   Registered Identifiers: {', '.join(registered_identifiers)}")
+                print(f"   Ship: {selected_ship}")
                 return True
             else:
                 return False
@@ -358,7 +658,14 @@ class DeviceRegistrationCLI:
                 print("-" * 60)
             
             print(f"  Device ID: {device['device_id']}")
-            print(f"  Hostname: {device['hostname']}")
+            print(f"  Primary Hostname: {device['hostname']}")
+            
+            # Show all identifiers if available
+            if 'all_identifiers' in device and len(device['all_identifiers']) > 1:
+                other_identifiers = [id for id in device['all_identifiers'] if id != device['hostname']]
+                if other_identifiers:
+                    print(f"  Additional Identifiers: {', '.join(other_identifiers)}")
+            
             print(f"  Type: {device['device_type']}")
             if device['vendor']:
                 print(f"  Vendor: {device['vendor']}")
@@ -396,40 +703,43 @@ class DeviceRegistrationCLI:
             print(f"\n🏗️  AIOps Device Registry - Interactive Registration")
             print("=" * 60)
             print("1. Register New Ship")
-            print("2. Register New Device/Hostname")
-            print("3. Lookup Hostname")
-            print("4. List All Ships")
-            print("5. List All Devices")
-            print("6. List Devices for Specific Ship")
-            print("7. Show Registry Statistics")
-            print("8. Exit")
+            print("2. Register New Device/Hostname") 
+            print("3. Auto-Register Current System")
+            print("4. Lookup Hostname/IP")
+            print("5. List All Ships")
+            print("6. List All Devices")
+            print("7. List Devices for Specific Ship")
+            print("8. Show Registry Statistics")
+            print("9. Exit")
             
             try:
-                choice = input("\nSelect option (1-8): ").strip()
+                choice = input("\nSelect option (1-9): ").strip()
                 
                 if choice == '1':
                     self.interactive_ship_creation()
                 elif choice == '2':
                     self.interactive_device_registration()
                 elif choice == '3':
-                    hostname = input("Enter hostname to lookup: ").strip()
-                    if hostname:
-                        self.lookup_and_display(hostname)
+                    self.auto_register_current_system()
                 elif choice == '4':
-                    self.display_ships()
+                    identifier = input("Enter hostname or IP to lookup: ").strip()
+                    if identifier:
+                        self.lookup_and_display(identifier)
                 elif choice == '5':
-                    self.display_devices()
+                    self.display_ships()
                 elif choice == '6':
+                    self.display_devices()
+                elif choice == '7':
                     ship_id = input("Enter ship ID: ").strip()
                     if ship_id:
                         self.display_devices(ship_id)
-                elif choice == '7':
-                    self.display_stats()
                 elif choice == '8':
+                    self.display_stats()
+                elif choice == '9':
                     print("👋 Goodbye!")
                     break
                 else:
-                    print("❌ Invalid choice. Please select 1-8.")
+                    print("❌ Invalid choice. Please select 1-9.")
                     
             except KeyboardInterrupt:
                 print("\n👋 Goodbye!")
@@ -480,6 +790,16 @@ def main():
         action='store_true',
         help='Show registry statistics and exit'
     )
+    parser.add_argument(
+        '--auto-register',
+        action='store_true',
+        help='Auto-detect current system and register interactively'
+    )
+    parser.add_argument(
+        '--additional-identifiers',
+        nargs='*',
+        help='Additional identifiers (IPs, alternate hostnames) when registering hostname'
+    )
     
     args = parser.parse_args()
     
@@ -505,6 +825,10 @@ def main():
         cli.display_stats()
         return
     
+    if args.auto_register:
+        cli.auto_register_current_system()
+        return
+    
     if args.lookup:
         cli.lookup_and_display(args.lookup)
         return
@@ -515,9 +839,13 @@ def main():
         return
     
     if args.hostname and args.ship_id and args.device_type:
-        device_id = cli.register_device(args.hostname, args.ship_id, args.device_type)
+        device_id, registered_identifiers = cli.register_device(
+            args.hostname, args.ship_id, args.device_type, 
+            additional_identifiers=args.additional_identifiers
+        )
         if device_id:
             print(f"✅ Device registered successfully! Device ID: {device_id}")
+            print(f"✅ Registered identifiers: {', '.join(registered_identifiers)}")
         return
     
     # Start interactive mode
