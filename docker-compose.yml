@@ -24,6 +24,11 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # VictoriaMetrics - Metrics storage
   victoria-metrics:
@@ -45,6 +50,11 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # VictoriaMetrics Agent - Scrapes metrics and sends to VictoriaMetrics
   vmagent:
@@ -60,6 +70,11 @@ services:
       - victoria-metrics
       - node-exporter
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Node Exporter - System metrics
   node-exporter:
@@ -73,6 +88,11 @@ services:
     volumes:
       - '/:/host:ro,rslave'
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Grafana - Visualization and dashboards
   grafana:
@@ -100,6 +120,11 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Qdrant - Vector database for RAG
   qdrant:
@@ -118,6 +143,11 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Ollama - LLM inference engine
   ollama:
@@ -138,6 +168,11 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # NATS - Message bus with JetStream
   nats:
@@ -159,6 +194,11 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # MailHog - Local SMTP testing
   mailhog:
@@ -174,6 +214,11 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Vector - Log processing and routing
   vector:
@@ -202,6 +247,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # VMAlert - Alert manager for VictoriaMetrics
   vmalert:
@@ -222,6 +272,11 @@ services:
       - victoria-metrics
       - alertmanager
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Alertmanager - Handle alerts and route to MailHog
   alertmanager:
@@ -240,6 +295,11 @@ services:
     depends_on:
       - mailhog
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # River Anomaly Detection Service - v0.2 streaming anomaly detection
   anomaly-detection:
@@ -270,6 +330,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Benthos - Stream processing for event correlation
   benthos:
@@ -294,6 +359,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Benthos Data Enrichment - Level 1 correlation for raw data enrichment
   benthos-enrichment:
@@ -314,6 +384,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Enhanced Anomaly Detection - Context-aware anomaly detection with enriched data
   enhanced-anomaly-detection:
@@ -338,6 +413,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Network Device Collector - SNMP-based network infrastructure monitoring
   network-device-collector:
@@ -360,6 +440,11 @@ services:
     networks:
       - default
     privileged: false  # SNMP doesn't require privileged access
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Incident API - REST API for incident management
   incident-api:
@@ -386,6 +471,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # v0.3 Services - Predictive Link Health + Guarded Auto-Remediation
 
@@ -412,6 +502,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Remediation Service - Guarded auto-remediation with approval workflows
   remediation:
@@ -436,6 +531,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Open Policy Agent - Policy enforcement for remediation actions
   opa:
@@ -457,6 +557,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # v0.4 Services - Fleet Reporting, Capacity Forecasting, Cross-Ship Benchmarking
 
@@ -485,6 +590,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Capacity Forecasting Service - Seasonal traffic and capacity prediction
   capacity-forecasting:
@@ -511,6 +621,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Cross-Ship Benchmarking Service - Performance comparison and correlation analysis
   cross-ship-benchmarking:
@@ -537,6 +652,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Onboarding Service - Secure ship/project onboarding with two-level approvals
   onboarding-service:
@@ -572,6 +692,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Incident Explanation Service - User-friendly incident translation and visualization
   incident-explanation:
@@ -599,6 +724,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Data Flow Visualization Service
   data-flow-visualization:
@@ -624,6 +754,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
   # Application Log Collector Service
   application-log-collector:
@@ -645,6 +780,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 
 volumes:
   clickhouse_data:

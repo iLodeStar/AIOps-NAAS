@@ -16,5 +16,10 @@ services:
       retries: 12
     volumes:
       - keycloak_data:/opt/keycloak/data
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "30m"
 volumes:
   keycloak_data: {}
