@@ -152,6 +152,89 @@ pipeline:
           "processing_stage": "input_validation"
         }
     
+    # Device Registry Integration - Enhanced ship_id resolution
+    - mapping: |
+        # Enhanced ship_id resolution using Device Registry service
+        root.original_ship_id = this.ship_id
+        root.original_host = this.host
+        root.registry_lookup_attempted = false
+        root.registry_lookup_success = false
+        
+        # First check if we already have a valid ship_id
+        if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+          # Valid ship_id already exists, keep it
+          root.ship_id = this.ship_id
+          root.ship_id_source = "original_field"
+        } else {
+          # Need to resolve ship_id via registry lookup
+          root.registry_lookup_attempted = true
+          
+          # Try hostname-based lookup via Device Registry
+          let hostname = if this.host != null && this.host != "" { 
+            this.host 
+          } else if this.labels != null && this.labels.instance != null { 
+            this.labels.instance 
+          } else if this.hostname != null && this.hostname != "" {
+            this.hostname
+          } else {
+            null
+          }
+          
+          if hostname != null {
+            # Perform HTTP lookup to Device Registry with timeout and error handling
+            let registry_url = "http://device-registry:8080/lookup/" + hostname.url_encode()
+            
+            # Try registry lookup with fallback on error
+            try {
+              let lookup_result = registry_url.http_get(headers: {"Accept": "application/json"}, timeout: "2s").parse_json()
+              if lookup_result.success {
+                root.ship_id = lookup_result.mapping.ship_id
+                root.device_id = lookup_result.mapping.device_id  
+                root.device_type = lookup_result.mapping.device_type
+                root.ship_name = lookup_result.mapping.ship_name
+                root.device_vendor = lookup_result.mapping.vendor
+                root.device_model = lookup_result.mapping.model
+                root.device_location = lookup_result.mapping.location
+                root.ship_id_source = "device_registry"
+                root.registry_lookup_success = true
+              } else {
+                # Registry lookup returned not found, use smart fallback
+                root.ship_id = if hostname.contains("-") { 
+                  hostname.split("-")[0] + "-ship"
+                } else { 
+                  "unknown-ship" 
+                }
+                root.ship_id_source = "hostname_derived"
+              }
+            } catch error {
+              # Registry service unavailable or timeout, use intelligent fallback  
+              root.ship_id = if hostname.contains("-") {
+                hostname.split("-")[0] + "-ship"
+              } else if hostname.starts_with("192.168.") || hostname.starts_with("10.") {
+                "network-device-" + hostname.split(".")[2]
+              } else {
+                "unknown-ship"
+              }
+              root.ship_id_source = "fallback"
+              root.registry_error = error
+            }
+          } else {
+            # No hostname available, use ultimate fallback
+            root.ship_id = "unknown-ship"
+            root.ship_id_source = "no_hostname"
+          }
+        }
+        
+        # Add registry lookup metadata for debugging and monitoring
+        root.registry_metadata = {
+          "lookup_attempted": root.registry_lookup_attempted,
+          "lookup_success": root.registry_lookup_success,
+          "ship_id_source": root.ship_id_source,
+          "original_host": root.original_host,
+          "resolved_ship_id": root.ship_id,
+          "timestamp": now()
+        }
+
     # Parse and enrich events from all sources
     - mapping: |
         root.correlation_id = uuid_v4()
@@ -170,7 +253,13 @@ pipeline:
         }
         
         # Extract contextual information with safe null handling
-        root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else if this.labels != null && this.labels.instance != null { this.labels.instance } else if this.labels != null && this.labels.ship_id != null { this.labels.ship_id } else if this.host != null { this.host } else { "ship-01" }
+        # ship_id is now resolved by Device Registry lookup above, no fallback needed
+        # Preserve the resolved ship_id from registry processor
+        if this.ship_id == null || this.ship_id == "" {
+          root.ship_id = "unknown-ship"  # Final safety net
+        } else {
+          root.ship_id = this.ship_id
+        }
         
         root.service = "unknown"
         if this.labels != null && this.labels.job != null {

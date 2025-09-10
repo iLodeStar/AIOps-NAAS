@@ -118,6 +118,16 @@ docker compose ps qdrant ollama benthos
 - Pipeline: `anomaly.detected` → correlation logic → `incidents.created`
 - Health: `docker compose logs -f benthos`
 
+**🗂️ Device Registry (Hostname → Ship Mapping)**
+- Dashboard: [http://localhost:8081](http://localhost:8081)
+- Interactive Registration: `python scripts/register_device.py`
+- Quick Start: `bash scripts/start_device_registry.sh`
+- API Documentation: [http://localhost:8081/docs](http://localhost:8081/docs)
+- **Purpose**: Resolves raw hostnames (ubuntu-vm-01, 192.168.1.100) to meaningful ship IDs and device types
+- **Integration**: Benthos automatically queries registry for hostname → ship_id resolution
+- **Management**: Ships, devices, and hostname mappings with auto-generated device IDs
+- Docs: [Device Registry Guide](docs/device-registry-mapping-service.md)
+
 ### Recommended Service Start Order
 
 **1. Core Data Stack:**
@@ -125,9 +135,9 @@ docker compose ps qdrant ollama benthos
 docker compose up -d clickhouse victoria-metrics grafana nats
 ```
 
-**2. Monitoring & Alerts (optional):**
+**2. Core Infrastructure:**
 ```bash
-docker compose up -d vmagent alertmanager vmalert mailhog vector
+docker compose up -d vmagent alertmanager vmalert mailhog vector device-registry
 ```
 
 **3. Incident Pipeline:**

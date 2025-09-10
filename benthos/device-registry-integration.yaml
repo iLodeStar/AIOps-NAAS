@@ -1,0 +1,145 @@
+# Device Registry Integration Processor for Benthos
+# This processor performs hostname → ship_id lookups using the Device Registry service
+# Add this to your Benthos pipeline before other processing steps
+
+- mapping: |
+    # Enhanced ship_id resolution using Device Registry service
+    root.original_ship_id = this.ship_id
+    root.original_host = this.host
+    root.registry_lookup_attempted = false
+    root.registry_lookup_success = false
+    
+    # First check if we already have a valid ship_id
+    if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+      # Valid ship_id already exists, keep it
+      root.ship_id = this.ship_id
+      root.ship_id_source = "original_field"
+    } else {
+      # Need to resolve ship_id via registry lookup
+      root.registry_lookup_attempted = true
+      
+      # Try hostname-based lookup via Device Registry
+      let hostname = if this.host != null && this.host != "" { 
+        this.host 
+      } else if this.labels != null && this.labels.instance != null { 
+        this.labels.instance 
+      } else if this.hostname != null && this.hostname != "" {
+        this.hostname
+      } else {
+        null
+      }
+      
+      if hostname != null {
+        # Perform HTTP lookup to Device Registry
+        # Note: In production, consider caching results and handling timeouts
+        let registry_url = "http://device-registry:8080/lookup/" + hostname.url_encode()
+        let lookup_result = null
+        
+        # Try registry lookup (with error handling)
+        try {
+          lookup_result = registry_url.http_get().parse_json()
+          if lookup_result.success {
+            root.ship_id = lookup_result.mapping.ship_id
+            root.device_id = lookup_result.mapping.device_id  
+            root.device_type = lookup_result.mapping.device_type
+            root.ship_name = lookup_result.mapping.ship_name
+            root.device_vendor = lookup_result.mapping.vendor
+            root.device_model = lookup_result.mapping.model
+            root.device_location = lookup_result.mapping.location
+            root.ship_id_source = "device_registry"
+            root.registry_lookup_success = true
+          } else {
+            # Registry lookup failed, use fallback logic
+            root.ship_id = if hostname.contains("-") { 
+              hostname.split("-")[0] + "-ship"
+            } else { 
+              "unknown-ship" 
+            }
+            root.ship_id_source = "hostname_derived"
+          }
+        } catch {
+          # Registry service unavailable, use fallback logic  
+          root.ship_id = if hostname.contains("-") {
+            hostname.split("-")[0] + "-ship"
+          } else if hostname.starts_with("192.168.") || hostname.starts_with("10.") {
+            "network-device-" + hostname.split(".")[2]
+          } else {
+            "unknown-ship"
+          }
+          root.ship_id_source = "fallback"
+          root.registry_error = "service_unavailable"
+        }
+      } else {
+        # No hostname available, use ultimate fallback
+        root.ship_id = "unknown-ship"
+        root.ship_id_source = "no_hostname"
+      }
+    }
+    
+    # Add registry lookup metadata for debugging
+    root.registry_metadata = {
+      "lookup_attempted": root.registry_lookup_attempted,
+      "lookup_success": root.registry_lookup_success,
+      "ship_id_source": root.ship_id_source,
+      "original_host": root.original_host,
+      "resolved_ship_id": root.ship_id,
+      "timestamp": now()
+    }
+
+# Additional processor to update last_seen timestamp in registry
+- mapping: |
+    # Update last_seen timestamp if registry lookup was successful
+    if root.registry_lookup_success && root.original_host != null {
+      let hostname = root.original_host
+      let update_url = "http://device-registry:8080/lookup/" + hostname.url_encode() + "/update-last-seen"
+      
+      try {
+        let update_result = update_url.http_post("").parse_json()
+        root.registry_update_success = update_result.success
+      } catch {
+        root.registry_update_success = false
+      }
+    }
+
+# Device type enrichment processor  
+- mapping: |
+    # Enhance device_type classification if not already set by registry
+    if root.device_type == null || root.device_type == "" {
+      root.device_type = if this.service != null {
+        if this.service.contains("nginx") || this.service.contains("web") {
+          "server"
+        } else if this.service.contains("postgres") || this.service.contains("mysql") {
+          "server" 
+        } else if this.service.contains("network") || this.service.contains("snmp") {
+          "network"
+        } else {
+          "server"
+        }
+      } else if this.metric_name != null {
+        if this.metric_name.contains("cpu") || this.metric_name.contains("memory") {
+          "server"
+        } else if this.metric_name.contains("network") || this.metric_name.contains("interface") {
+          "network"
+        } else {
+          "unknown"
+        }
+      } else {
+        "unknown"
+      }
+    }
+    
+    # Ensure metric_name is safe for cache operations
+    root.metric_name = if this.metric_name != null && this.metric_name != "" { 
+      this.metric_name 
+    } else { 
+      "unknown_metric" 
+    }
+    
+    # Add enhanced event context
+    root.event_context = {
+      "ship_id": root.ship_id,
+      "device_type": root.device_type,
+      "device_id": if root.device_id != null { root.device_id } else { "unknown" },
+      "hostname": if this.host != null { this.host } else { "unknown" },
+      "source": if this.event_source != null { this.event_source } else { "unknown" }
+    }
