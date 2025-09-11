@@ -325,17 +325,23 @@ pipeline:
         value: "${! content() }"
         ttl: "900s"  # 15 minute temporal correlation window
         
-    # Fetch related events for cross-source correlation
-    - cache:
-        resource: "correlation_cache"
-        operator: "get"  
-        key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_interface\" } else { \"no_correlation_key\" } }"
+    # Fetch related events for cross-source correlation (only when correlation is expected)
+    - switch:
+      - check: json("metric_name") == "cpu_usage" || json("metric_name") == "memory_usage" || json("event_source") == "basic_metrics" || json("event_source") == "application_logs"
+        processors:
+          - cache:
+              resource: "correlation_cache"
+              operator: "get"  
+              key: "${! if json(\"metric_name\") != null && json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_basic_metrics_memory_usage\" } else if json(\"metric_name\") != null && json(\"metric_name\") == \"memory_usage\" { json(\"ship_id\") + \"_basic_metrics_cpu_usage\" } else if json(\"event_source\") == \"basic_metrics\" { json(\"ship_id\") + \"_application_logs_log_anomaly\" } else if json(\"event_source\") == \"application_logs\" { json(\"ship_id\") + \"_snmp_network_interface\" } else { \"no_correlation_key\" } }"
         
-    # Fetch secondary correlation (network during system issues)
-    - cache:
-        resource: "correlation_cache"
-        operator: "get"
-        key: "${! if json(\"event_source\") == \"basic_metrics\" && json(\"metric_name\") != null && json(\"metric_name\").contains(\"cpu\") { json(\"ship_id\") + \"_snmp_network_interface_utilization\" } else { \"no_secondary_key\" } }"
+    # Fetch secondary correlation (network during system issues, only when applicable)
+    - switch:
+      - check: json("event_source") == "basic_metrics" && json("metric_name") != null && json("metric_name").contains("cpu")
+        processors:
+          - cache:
+              resource: "correlation_cache"
+              operator: "get"
+              key: "${! json(\"ship_id\") + \"_snmp_network_interface_utilization\" }"
         
     # Create comprehensive correlated incidents
     - mapping: |
