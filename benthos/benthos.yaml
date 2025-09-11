@@ -106,6 +106,13 @@ pipeline:
           } else {
             {"ship_id": this.host, "source": "hostname_direct"}
           }
+        } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" && !this.metadata.source_host.contains("unknown") { 
+          # Try to derive from metadata.source_host (common in anomaly events)
+          if this.metadata.source_host.contains("-") {
+            {"ship_id": this.metadata.source_host.split("-").index(0) + "-ship", "source": "metadata_source_host_derived"}
+          } else {
+            {"ship_id": this.metadata.source_host, "source": "metadata_source_host_direct"}
+          }
         } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" { 
           # Try to derive from instance label
           if this.labels.instance.contains("-") {
@@ -119,6 +126,17 @@ pipeline:
         
         root.ship_id = ship_derivation_result.ship_id
         root.ship_id_source = ship_derivation_result.source
+        
+        # Normalize host field for device registry lookup
+        root.host = if this.host != null && this.host != "" {
+          this.host
+        } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" {
+          this.metadata.source_host
+        } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" {
+          this.labels.instance
+        } else {
+          "unknown"
+        }
         
         # Derive human-readable ship_name from ship_id
         root.ship_name = if root.ship_id != null && root.ship_id != "" {
@@ -213,6 +231,8 @@ pipeline:
         # Normalize service information
         root.service = if this.service != null && this.service != "" {
           this.service
+        } else if this.metadata != null && this.metadata.service != null && this.metadata.service != "" {
+          this.metadata.service
         } else if this.labels != null && this.labels.job != null && this.labels.job != "" {
           this.labels.job
         } else if this.application != null && this.application != "" {

@@ -211,7 +211,7 @@ class IncidentAPIService:
                 incident_data.get('incident_type', 'unknown'),
                 incident_data.get('incident_severity', 'info'),
                 resolved_ship_id,  # Use resolved ship_id instead of hardcoded fallback
-                incident_data.get('service', 'unknown'),
+                incident_data.get('service', 'unknown_service'),  # Use consistent fallback from Benthos
                 incident_data.get('status', 'open'),
                 incident_data.get('acknowledged', False),
                 datetime.fromisoformat(incident_data['created_at'].replace('Z', '+00:00')) if 'created_at' in incident_data else datetime.now(),
