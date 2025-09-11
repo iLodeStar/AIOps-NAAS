@@ -30,45 +30,14 @@
       }
       
       if hostname != null {
-        # Perform HTTP lookup to Device Registry
-        # Note: In production, consider caching results and handling timeouts
-        let registry_url = "http://device-registry:8080/lookup/" + hostname.url_encode()
-        let lookup_result = null
-        
-        # Try registry lookup (with error handling)
-        try {
-          lookup_result = registry_url.http_get().parse_json()
-          if lookup_result.success {
-            root.ship_id = lookup_result.mapping.ship_id
-            root.device_id = lookup_result.mapping.device_id  
-            root.device_type = lookup_result.mapping.device_type
-            root.ship_name = lookup_result.mapping.ship_name
-            root.device_vendor = lookup_result.mapping.vendor
-            root.device_model = lookup_result.mapping.model
-            root.device_location = lookup_result.mapping.location
-            root.ship_id_source = "device_registry"
-            root.registry_lookup_success = true
-          } else {
-            # Registry lookup failed, use fallback logic
-            root.ship_id = if hostname.contains("-") { 
-              hostname.split("-")[0] + "-ship"
-            } else { 
-              "unknown-ship" 
-            }
-            root.ship_id_source = "hostname_derived"
-          }
-        } catch {
-          # Registry service unavailable, use fallback logic  
-          root.ship_id = if hostname.contains("-") {
-            hostname.split("-")[0] + "-ship"
-          } else if hostname.starts_with("192.168.") || hostname.starts_with("10.") {
-            "network-device-" + hostname.split(".")[2]
-          } else {
-            "unknown-ship"
-          }
-          root.ship_id_source = "fallback"
-          root.registry_error = "service_unavailable"
+        # For now, use simple hostname-based fallback until Device Registry integration is fixed
+        # URL encoding and HTTP calls removed due to Benthos v4.27.0 compatibility issues
+        root.ship_id = if hostname.contains("-") {
+          hostname.split("-").index(0) + "-ship"
+        } else {
+          "unknown-ship"
         }
+        root.ship_id_source = "hostname_derived"
       } else {
         # No hostname available, use ultimate fallback
         root.ship_id = "unknown-ship"
@@ -88,18 +57,10 @@
 
 # Additional processor to update last_seen timestamp in registry
 - mapping: |
-    # Update last_seen timestamp if registry lookup was successful
-    if root.registry_lookup_success && root.original_host != null {
-      let hostname = root.original_host
-      let update_url = "http://device-registry:8080/lookup/" + hostname.url_encode() + "/update-last-seen"
-      
-      try {
-        let update_result = update_url.http_post("").parse_json()
-        root.registry_update_success = update_result.success
-      } catch {
-        root.registry_update_success = false
-      }
-    }
+    # Registry update functionality disabled due to Benthos v4.27.0 compatibility issues
+    # HTTP calls with url_encode() method are not available in this version
+    root.registry_update_success = false
+    root.registry_update_note = "disabled_for_v4_27_0_compatibility"
 
 # Device type enrichment processor  
 - mapping: |
