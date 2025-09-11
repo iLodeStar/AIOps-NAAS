@@ -19,6 +19,7 @@ import asyncio
 import logging
 import json
 import uuid
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
@@ -82,12 +83,21 @@ class IncidentAPIService:
     """Main incident API service"""
     
     def __init__(self):
+        # Read ClickHouse configuration from environment variables
+        ch_host = os.getenv('CLICKHOUSE_HOST', 'clickhouse')
+        ch_port = int(os.getenv('CLICKHOUSE_PORT', '9000'))
+        ch_user = os.getenv('CLICKHOUSE_USER', 'admin')
+        ch_password = os.getenv('CLICKHOUSE_PASSWORD', 'admin')
+        ch_database = os.getenv('CLICKHOUSE_DATABASE', 'logs')
+        
+        logger.info(f"Connecting to ClickHouse at {ch_host}:{ch_port} with user: {ch_user}")
+        
         self.clickhouse_client = ClickHouseClient(
-            host='clickhouse',
-            port=9000,
-            user='default',
-            password='clickhouse123',
-            database='logs'
+            host=ch_host,
+            port=ch_port,
+            user=ch_user,
+            password=ch_password,
+            database=ch_database
         )
         self.nats_client = None
         self.health_status = {"healthy": False, "clickhouse_connected": False, "nats_connected": False}
@@ -95,8 +105,11 @@ class IncidentAPIService:
     async def connect_nats(self):
         """Connect to NATS to consume incident events"""
         try:
+            nats_url = os.getenv('NATS_URL', 'nats://nats:4222')
+            logger.info(f"Connecting to NATS at {nats_url}")
+            
             self.nats_client = nats.NATS()
-            await self.nats_client.connect("nats://nats:4222")
+            await self.nats_client.connect(nats_url)
             
             # Subscribe to incident events from Benthos
             async def incident_handler(msg):
