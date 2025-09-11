@@ -124,9 +124,58 @@ class IncidentAPIService:
             logger.error(f"ClickHouse connection failed: {e}")
             return False
     
+    async def resolve_ship_id(self, incident_data: Dict[str, Any]) -> str:
+        """Resolve ship_id using device registry integration"""
+        # First check if we have a valid ship_id already
+        ship_id = incident_data.get('ship_id')
+        if ship_id and ship_id != "" and not ship_id.startswith("unknown"):
+            return ship_id
+        
+        # Try to resolve using device registry
+        hostname = None
+        # Look for hostname in common locations
+        if incident_data.get('host'):
+            hostname = incident_data['host']
+        elif incident_data.get('hostname'):
+            hostname = incident_data['hostname']
+        elif incident_data.get('labels', {}).get('instance'):
+            hostname = incident_data['labels']['instance']
+        
+        if hostname:
+            try:
+                # Call device registry service
+                response = requests.get(f"http://device-registry:8080/lookup/{hostname}", timeout=5)
+                if response.status_code == 200:
+                    registry_data = response.json()
+                    if registry_data.get('success') and registry_data.get('mapping', {}).get('ship_id'):
+                        resolved_ship_id = registry_data['mapping']['ship_id']
+                        logger.info(f"Resolved ship_id from device registry: {hostname} -> {resolved_ship_id}")
+                        return resolved_ship_id
+                else:
+                    logger.debug(f"Device registry lookup failed for hostname {hostname}: {response.status_code}")
+            except Exception as e:
+                logger.debug(f"Device registry lookup error for {hostname}: {e}")
+        
+        # Fallback to hostname-based derivation (consistent with Benthos)
+        if hostname:
+            if "-" in hostname:
+                derived_ship_id = hostname.split("-")[0] + "-ship"
+                logger.info(f"Derived ship_id from hostname: {hostname} -> {derived_ship_id}")
+                return derived_ship_id
+            else:
+                logger.info(f"Using hostname as ship_id: {hostname}")
+                return hostname
+        
+        # Ultimate fallback
+        logger.warning("No valid ship_id or hostname found, using 'unknown-ship'")
+        return "unknown-ship"
+    
     async def store_incident(self, incident_data: Dict[str, Any]):
         """Store incident in ClickHouse"""
         try:
+            # Resolve ship_id using device registry integration
+            resolved_ship_id = await self.resolve_ship_id(incident_data)
+            
             # Convert timeline and correlated_events to JSON strings
             timeline_json = json.dumps(incident_data.get('timeline', []))
             correlated_events_json = json.dumps(incident_data.get('correlated_events', []))
@@ -148,7 +197,7 @@ class IncidentAPIService:
                 incident_data.get('event_type', 'incident'),
                 incident_data.get('incident_type', 'unknown'),
                 incident_data.get('incident_severity', 'info'),
-                incident_data.get('ship_id', 'ship-01'),
+                resolved_ship_id,  # Use resolved ship_id instead of hardcoded fallback
                 incident_data.get('service', 'unknown'),
                 incident_data.get('status', 'open'),
                 incident_data.get('acknowledged', False),
@@ -167,7 +216,7 @@ class IncidentAPIService:
             )
             
             self.clickhouse_client.execute(query, [values])
-            logger.info(f"Stored incident {values[0]} in ClickHouse")
+            logger.info(f"Stored incident {values[0]} with ship_id {resolved_ship_id} in ClickHouse")
             
         except Exception as e:
             logger.error(f"Error storing incident in ClickHouse: {e}")
@@ -385,7 +434,7 @@ async def create_test_incident():
         "event_type": "incident",
         "incident_type": "test_incident",
         "incident_severity": "warning",
-        "ship_id": "ship-01",
+        "ship_id": "test-ship",
         "service": "test-service",
         "status": "open",
         "acknowledged": False,
