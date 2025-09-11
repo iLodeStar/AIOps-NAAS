@@ -96,25 +96,58 @@ pipeline:
         }
         root.processing_timestamp = now()
         
-        # Normalize ship_id with multiple fallback strategies
-        root.ship_id = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") { 
-          this.ship_id 
+        # Normalize ship_id with multiple fallback strategies and track derivation source
+        let ship_derivation_result = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") { 
+          {"ship_id": this.ship_id, "source": "original_field"}
         } else if this.host != null && this.host != "" && !this.host.contains("unknown") { 
           # Try to derive ship_id from hostname
           if this.host.contains("-") {
-            this.host.split("-").index(0) + "-ship"
+            {"ship_id": this.host.split("-").index(0) + "-ship", "source": "hostname_derived"}
           } else {
-            this.host
+            {"ship_id": this.host, "source": "hostname_direct"}
           }
         } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" { 
           # Try to derive from instance label
           if this.labels.instance.contains("-") {
-            this.labels.instance.split("-").index(0) + "-ship"  
+            {"ship_id": this.labels.instance.split("-").index(0) + "-ship", "source": "instance_label_derived"}
           } else {
-            this.labels.instance
+            {"ship_id": this.labels.instance, "source": "instance_label_direct"}
           }
         } else { 
-          "unknown-ship" 
+          {"ship_id": "unknown-ship", "source": "fallback"}
+        }
+        
+        root.ship_id = ship_derivation_result.ship_id
+        root.ship_id_source = ship_derivation_result.source
+        
+        # Derive human-readable ship_name from ship_id
+        root.ship_name = if root.ship_id != null && root.ship_id != "" {
+          if root.ship_id == "unknown-ship" {
+            "Unknown Ship"
+          } else if root.ship_id.contains("-ship") && root.ship_id.length() > 5 {
+            # Remove "-ship" suffix and convert to proper case for display
+            if root.ship_id.slice(0, root.ship_id.length() - 5).contains("-") {
+              # Convert "msc-aurora" to "MSC AURORA"
+              root.ship_id.slice(0, root.ship_id.length() - 5).split("-").map_each(word -> word.uppercase()).join(" ")
+            } else {
+              # Convert "aurora" to "AURORA" for single words  
+              root.ship_id.slice(0, root.ship_id.length() - 5).uppercase()
+            }
+          } else {
+            # For non-standard ship_id formats, capitalize first letter
+            root.ship_id.capitalize()
+          }
+        } else {
+          "Unknown Ship"
+        }
+        
+        # Add ship registry metadata for debugging and monitoring
+        root.registry_metadata = {
+          "ship_id_source": root.ship_id_source,
+          "original_host": if this.host != null { this.host } else { "not_available" },
+          "resolved_ship_id": root.ship_id,
+          "resolved_ship_name": root.ship_name,
+          "derivation_timestamp": now()
         }
         
         # Normalize event source with fallbacks
