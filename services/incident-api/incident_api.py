@@ -139,12 +139,7 @@ class IncidentAPIService:
     
     async def resolve_ship_id(self, incident_data: Dict[str, Any]) -> str:
         """Resolve ship_id using device registry integration"""
-        # First check if we have a valid ship_id already
-        ship_id = incident_data.get('ship_id')
-        if ship_id and ship_id != "" and not ship_id.startswith("unknown"):
-            return ship_id
-        
-        # Try to resolve using device registry
+        # Try to resolve using device registry first (this is the primary source of truth)
         hostname = None
         # Look for hostname in common locations
         if incident_data.get('host'):
@@ -168,6 +163,12 @@ class IncidentAPIService:
                     logger.debug(f"Device registry lookup failed for hostname {hostname}: {response.status_code}")
             except Exception as e:
                 logger.debug(f"Device registry lookup error for {hostname}: {e}")
+        
+        # If device registry lookup failed, check if we have a valid ship_id already
+        ship_id = incident_data.get('ship_id')
+        if ship_id and ship_id != "" and not ship_id.startswith("unknown"):
+            logger.info(f"Using existing ship_id (device registry lookup failed): {ship_id}")
+            return ship_id
         
         # Fallback to hostname-based derivation (consistent with Benthos)
         if hostname:
