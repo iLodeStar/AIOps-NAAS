@@ -174,9 +174,11 @@ services:
         max-file: "3"
         max-size: "30m"
 
-  # NATS - Message bus with JetStream
+  # NATS - Message bus with JetStream (includes CLI for debugging)
   nats:
-    image: nats:alpine
+    build:
+      context: ./nats
+      dockerfile: Dockerfile
     container_name: aiops-nats
     ports:
       - "4222:4222"  # Client connections
