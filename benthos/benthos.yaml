@@ -37,11 +37,8 @@ pipeline:
     # CRITICAL FIX: Filter out INFO/DEBUG level events early to prevent incident creation
     - switch:
       - check: |
-          let severity = if this.severity != null { this.severity.lowercase() } else if this.level != null { this.level.lowercase() } else if this.metadata != null && this.metadata.anomaly_severity != null { this.metadata.anomaly_severity.lowercase() } else { "info" }
-          let anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.0 }
-          
-          # Skip INFO/DEBUG logs unless they have high anomaly scores
-          (severity == "info" || severity == "debug" || severity == "trace") && anomaly_score < 0.7
+          this.severity != null && (this.severity.lowercase() == "info" || this.severity.lowercase() == "debug" || this.severity.lowercase() == "trace") && (this.anomaly_score == null || this.anomaly_score < 0.7) ||
+          this.level != null && (this.level.lowercase() == "info" || this.level.lowercase() == "debug" || this.level.lowercase() == "trace") && (this.anomaly_score == null || this.anomaly_score < 0.7)
         processors:
           - mapping: "root = deleted()"  # Drop the event
       
@@ -501,22 +498,18 @@ pipeline:
 
     # CRITICAL FIX: Enhanced suppression check - prevent duplicate incidents with multiple keys
     - try:
-        drop_on_err: true
-        processors:
-          - cache:
-              resource: "suppression_cache"
-              operator: "get"
-              # More granular suppression key including metric_name and service
-              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
+        - cache:
+            resource: "suppression_cache"
+            operator: "get"
+            # More granular suppression key including metric_name and service
+            key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
 
     # CRITICAL FIX: Additional suppression for tracking_id-based deduplication
     - try:
-        drop_on_err: true
-        processors:
-          - cache:
-              resource: "tracking_suppression_cache"
-              operator: "get"
-              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+        - cache:
+            resource: "tracking_suppression_cache"
+            operator: "get"
+            key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
 
     # Only process if not suppressed by either check
     - switch:
