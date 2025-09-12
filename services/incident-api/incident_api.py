@@ -187,8 +187,22 @@ class IncidentAPIService:
     async def store_incident(self, incident_data: Dict[str, Any]):
         """Store incident in ClickHouse with enhanced metadata handling"""
         try:
+            # CRITICAL DEBUG: Log raw incident data for tracing missing fields
+            logger.info(f"🔍 INCIDENT DATA TRACE - Raw input data:")
+            logger.info(f"  Original keys: {list(incident_data.keys())}")
+            logger.info(f"  ship_id from input: {incident_data.get('ship_id', 'NOT_PROVIDED')}")
+            logger.info(f"  host from input: {incident_data.get('host', 'NOT_PROVIDED')}")
+            logger.info(f"  hostname from input: {incident_data.get('hostname', 'NOT_PROVIDED')}")
+            logger.info(f"  service from input: {incident_data.get('service', 'NOT_PROVIDED')}")
+            logger.info(f"  metric_name from input: {incident_data.get('metric_name', 'NOT_PROVIDED')}")
+            logger.info(f"  metric_value from input: {incident_data.get('metric_value', 'NOT_PROVIDED')}")
+            logger.info(f"  labels from input: {incident_data.get('labels', 'NOT_PROVIDED')}")
+            if 'metadata' in incident_data and incident_data['metadata']:
+                logger.info(f"  metadata keys: {list(incident_data['metadata'].keys()) if isinstance(incident_data['metadata'], dict) else 'NOT_DICT'}")
+            
             # Resolve ship_id using device registry integration
             resolved_ship_id = await self.resolve_ship_id(incident_data)
+            logger.info(f"🔍 SHIP_ID RESOLUTION - Input: {incident_data.get('ship_id', 'None')}, Resolved: {resolved_ship_id}")
             
             # Convert timeline and correlated_events to JSON strings
             timeline_json = json.dumps(incident_data.get('timeline', []))
@@ -196,34 +210,86 @@ class IncidentAPIService:
             metadata_json = json.dumps(incident_data.get('metadata', {}))
             
             # CRITICAL FIX: Extract and validate all fields properly
-            metric_value = incident_data.get('metric_value', 0.0)
+            metric_value = original_metric_value
             if not isinstance(metric_value, (int, float)):
                 try:
                     metric_value = float(metric_value) if metric_value else 0.0
+                    logger.info(f"🔍 METRIC VALUE - Converted to float: {metric_value}")
                 except (ValueError, TypeError):
-                    metric_value = 0.0
+                    # Try extracting from message if conversion failed
+                    message = incident_data.get('message', '')
+                    if 'metric_value=' in message:
+                        import re
+                        match = re.search(r'metric_value=([\d.]+)', message)
+                        if match:
+                            metric_value = float(match.group(1))
+                            logger.info(f"🔍 METRIC VALUE - Extracted from message: {metric_value}")
+                        else:
+                            metric_value = 0.0
+                    else:
+                        metric_value = 0.0
+                        logger.warning(f"🔍 METRIC VALUE - Could not parse, using 0.0")
             
             anomaly_score = incident_data.get('anomaly_score', 0.0)
             if not isinstance(anomaly_score, (int, float)):
                 try:
                     anomaly_score = float(anomaly_score) if anomaly_score else 0.0
+                    logger.info(f"🔍 ANOMALY SCORE - Converted to float: {anomaly_score}")
                 except (ValueError, TypeError):
                     anomaly_score = 0.0
+                    logger.warning(f"🔍 ANOMALY SCORE - Could not parse, using 0.0")
             
             # CRITICAL FIX: Ensure proper service field handling
             service_name = incident_data.get('service', 'unknown_service')
             if not service_name or service_name == '':
                 service_name = 'unknown_service'
+            logger.info(f"🔍 SERVICE RESOLUTION - Input: {incident_data.get('service', 'None')}, Final: {service_name}")
                 
             # CRITICAL FIX: Better incident type mapping
             incident_type = incident_data.get('incident_type', 'single_anomaly')
             if not incident_type or incident_type == '':
                 incident_type = 'single_anomaly'
+            logger.info(f"🔍 INCIDENT TYPE - Input: {incident_data.get('incident_type', 'None')}, Final: {incident_type}")
                 
             # CRITICAL FIX: Proper severity handling
             incident_severity = incident_data.get('incident_severity', 'medium')
             if incident_severity in ['info', 'debug']:
                 incident_severity = 'low'  # Map info/debug to low severity
+            logger.info(f"🔍 SEVERITY MAPPING - Input: {incident_data.get('incident_severity', 'None')}, Final: {incident_severity}")
+                
+            # CRITICAL DEBUG: Log metric extraction process
+            original_metric_name = incident_data.get('metric_name', 'unknown_metric')
+            logger.info(f"🔍 METRIC NAME EXTRACTION - Input: {original_metric_name}")
+            
+            # Try to extract metric name from different possible locations
+            extracted_metric_name = original_metric_name
+            if original_metric_name == 'unknown_metric':
+                # Try extracting from message content
+                message = incident_data.get('message', '')
+                if 'metric_name=' in message:
+                    import re
+                    match = re.search(r'metric_name=([^\s]+)', message)
+                    if match:
+                        extracted_metric_name = match.group(1)
+                        logger.info(f"🔍 METRIC NAME - Extracted from message: {extracted_metric_name}")
+                
+                # Try extracting from labels
+                labels = incident_data.get('labels', {})
+                if isinstance(labels, dict) and 'metric_name' in labels:
+                    extracted_metric_name = labels['metric_name']
+                    logger.info(f"🔍 METRIC NAME - Extracted from labels: {extracted_metric_name}")
+                
+                # Try extracting from metadata
+                metadata = incident_data.get('metadata', {})
+                if isinstance(metadata, dict) and 'metric_name' in metadata:
+                    extracted_metric_name = metadata['metric_name']
+                    logger.info(f"🔍 METRIC NAME - Extracted from metadata: {extracted_metric_name}")
+            
+            logger.info(f"🔍 FINAL METRIC NAME: {extracted_metric_name}")
+            
+            # Enhanced metric value extraction and validation
+            original_metric_value = incident_data.get('metric_value', 0.0)
+            logger.info(f"🔍 METRIC VALUE - Original: {original_metric_value} (type: {type(original_metric_value)})")
             
             # Insert incident into ClickHouse
             query = """
@@ -249,7 +315,7 @@ class IncidentAPIService:
                 datetime.fromisoformat(incident_data['updated_at'].replace('Z', '+00:00')) if 'updated_at' in incident_data else datetime.now(),
                 incident_data.get('correlation_id', ''),
                 datetime.now(),
-                incident_data.get('metric_name', 'unknown_metric'),  # Consistent with Benthos
+                extracted_metric_name,  # Use extracted metric name instead of original
                 metric_value,
                 anomaly_score,
                 incident_data.get('detector_name', ''),
@@ -260,7 +326,13 @@ class IncidentAPIService:
             )
             
             self.clickhouse_client.execute(query, [values])
-            logger.info(f"Stored incident {values[0]} - type: {incident_type}, severity: {incident_severity}, ship_id: {resolved_ship_id}, metric: {incident_data.get('metric_name', 'unknown')}, value: {metric_value}")
+            logger.info(f"✅ STORED INCIDENT {values[0]}:")
+            logger.info(f"  🏷️  Ship ID: {resolved_ship_id}")
+            logger.info(f"  🏢  Service: {service_name}")  
+            logger.info(f"  📊  Metric: {extracted_metric_name} = {metric_value}")
+            logger.info(f"  📈  Anomaly Score: {anomaly_score}")
+            logger.info(f"  ⚠️  Type: {incident_type}, Severity: {incident_severity}")
+            logger.info(f"🔍 INCIDENT STORAGE COMPLETE - All field extractions logged above")
             
         except Exception as e:
             logger.error(f"Error storing incident in ClickHouse: {e}")
