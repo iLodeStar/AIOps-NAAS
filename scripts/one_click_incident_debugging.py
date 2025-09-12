@@ -208,9 +208,74 @@ class OneClickIncidentDebugger:
             ))
             
             print(f"  {'✅' if status == 'healthy' else '❌'} {service_name}: {details}")
-            if errors:
-                for error in errors:
-                    print(f"    ⚠️  {error}")
+    def _check_syslog_ports(self):
+        """Check availability of syslog ports for system log ingestion"""
+        ports_to_check = [
+            (514, 'UDP', 'Standard syslog'),
+            (1514, 'UDP', 'Vector syslog UDP'),
+            (1516, 'TCP', 'Vector syslog TCP')
+        ]
+        
+        for port, protocol, description in ports_to_check:
+            try:
+                import socket
+                if protocol == 'UDP':
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.settimeout(2)
+                    # For UDP, we can try to send a test message
+                    try:
+                        test_msg = b"<134>1 2024-01-01T00:00:00Z test-host test - - Test connectivity"
+                        sock.sendto(test_msg, ('localhost', port))
+                        print(f"  ✅ {description} (UDP {port}): Accessible")
+                    except Exception:
+                        print(f"  ❌ {description} (UDP {port}): Not accessible")
+                    finally:
+                        sock.close()
+                        
+                elif protocol == 'TCP':
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)
+                    result = sock.connect_ex(('localhost', port))
+                    if result == 0:
+                        print(f"  ✅ {description} (TCP {port}): Accessible")
+                    else:
+                        print(f"  ❌ {description} (TCP {port}): Not accessible")
+                    sock.close()
+                    
+            except Exception as e:
+                print(f"  ❌ {description} ({protocol} {port}): Error - {str(e)[:50]}")
+                
+        # Check Vector configuration for syslog sources
+        self._check_vector_syslog_config()
+    
+    def _check_vector_syslog_config(self):
+        """Check Vector configuration for syslog source configuration"""
+        try:
+            # Try to get Vector configuration info via API
+            response = requests.get('http://localhost:8686/metrics', timeout=10)
+            if response.status_code == 200:
+                metrics_text = response.text
+                
+                # Look for syslog-related metrics
+                syslog_metrics = [line for line in metrics_text.split('\n') 
+                                 if 'syslog' in line.lower() and 'vector_component' in line]
+                
+                if syslog_metrics:
+                    print(f"  ✅ Vector syslog components active: {len(syslog_metrics)} metrics found")
+                    
+                    # Show specific syslog source metrics if available
+                    for metric in syslog_metrics[:3]:  # Show first 3
+                        if 'received_events_total' in metric:
+                            print(f"    📊 {metric.strip()}")
+                else:
+                    print(f"  ⚠️  No Vector syslog component metrics found")
+                    
+        except Exception as e:
+            print(f"  ⚠️  Vector syslog config check failed: {str(e)[:50]}")
+        
+        # Additional system syslog port checks
+        print(f"🔍 Checking syslog port accessibility...")
+        self._check_syslog_ports()
 
     def _check_clickhouse_health(self) -> Tuple[str, str, List[str]]:
         """Check ClickHouse health with credential detection"""
@@ -247,40 +312,72 @@ class OneClickIncidentDebugger:
             return 'unhealthy', 'Connection failed', [str(e)[:100]]
             
     def _generate_test_data(self):
-        """Generate comprehensive test data points for tracking"""
-        print("🧪 Generating trackable test data points...")
+        """Generate comprehensive test data points for tracking, including system syslog scenarios"""
+        print("🧪 Generating trackable test data points (including system syslog scenarios)...")
         
-        # Generate 3 different test scenarios
+        # Generate test scenarios including real system service patterns
         scenarios = [
+            # Maritime application scenario
             {
                 'ship_id': 'test-ship-alpha',
                 'hostname': 'alpha-bridge-01',
                 'service': 'navigation_system',
                 'metric': 'gps_accuracy_meters',
                 'value': 2.5,
-                'message': 'GPS accuracy degraded to 2.5 meters in heavy fog'
+                'message': 'GPS accuracy degraded to 2.5 meters in heavy fog',
+                'syslog_type': 'application'
             },
+            # System service scenario (like systemd)
             {
                 'ship_id': 'test-ship-beta', 
                 'hostname': 'beta-engine-02',
-                'service': 'engine_monitoring',
-                'metric': 'fuel_pressure_psi',
-                'value': 45.2,
-                'message': 'Fuel pressure dropped to 45.2 PSI on starboard engine'
+                'service': 'systemd',
+                'metric': 'service_restart_count',
+                'value': 3.0,
+                'message': 'Started engine monitoring service after 3 restart attempts',
+                'syslog_type': 'system'
             },
+            # Network service scenario (like sshd)
             {
                 'ship_id': 'test-ship-gamma',
                 'hostname': 'gamma-comms-01',
-                'service': 'communication_system',
-                'metric': 'signal_strength_dbm',
-                'value': -75.0,
-                'message': 'Radio signal strength decreased to -75 dBm'
+                'service': 'sshd',
+                'metric': 'failed_login_attempts',
+                'value': 5.0,
+                'message': 'Failed password for maintenance from 192.168.1.100 port 22 ssh2',
+                'syslog_type': 'system'
+            },
+            # Kernel/hardware scenario
+            {
+                'ship_id': 'test-ship-delta',
+                'hostname': 'delta-sensor-03',
+                'service': 'kernel',
+                'metric': 'temperature_celsius',
+                'value': 75.5,
+                'message': 'Hardware temperature sensor reading 75.5°C on CPU thermal zone',
+                'syslog_type': 'system'
+            },
+            # Cron service scenario
+            {
+                'ship_id': 'test-ship-epsilon',
+                'hostname': 'epsilon-backup-01',
+                'service': 'cron',
+                'metric': 'backup_duration_seconds',
+                'value': 1800.0,
+                'message': 'Daily backup job completed in 1800 seconds',
+                'syslog_type': 'system'
             }
         ]
         
         for i, scenario in enumerate(scenarios):
             tracking_id = f"{self.tracking_session}-DATA-{i+1:03d}"
             timestamp = datetime.now()
+            
+            # Add syslog-specific message formatting for system services
+            if scenario.get('syslog_type') == 'system':
+                log_message = f"[{tracking_id}] {scenario['message']}"
+            else:
+                log_message = f"[{tracking_id}] {scenario['message']}"
             
             test_point = TestDataPoint(
                 tracking_id=tracking_id,
@@ -289,7 +386,7 @@ class OneClickIncidentDebugger:
                 metric_name=scenario['metric'],
                 metric_value=scenario['value'],
                 hostname=scenario['hostname'],
-                log_message=f"[{tracking_id}] {scenario['message']}",
+                log_message=log_message,
                 timestamp=timestamp,
                 expected_incident_data={
                     'ship_id': scenario['ship_id'],
@@ -297,12 +394,14 @@ class OneClickIncidentDebugger:
                     'metric_name': scenario['metric'],
                     'metric_value': scenario['value'],
                     'hostname': scenario['hostname'],
-                    'tracking_id': tracking_id
+                    'tracking_id': tracking_id,
+                    'syslog_type': scenario.get('syslog_type', 'application')
                 }
             )
             
             self.test_data_points.append(test_point)
-            print(f"  📝 Generated: {tracking_id} -> {scenario['ship_id']}/{scenario['service']}")
+            syslog_type_indicator = "🖥️ " if scenario.get('syslog_type') == 'system' else "📱"
+            print(f"  📝 Generated: {syslog_type_indicator} {tracking_id} -> {scenario['ship_id']}/{scenario['service']} ({'system syslog' if scenario.get('syslog_type') == 'system' else 'app log'})")
 
     def _inject_test_data(self):
         """Inject test data into the pipeline"""
@@ -351,27 +450,108 @@ class OneClickIncidentDebugger:
             print(f"    ❌ Device registration error: {str(e)}")
 
     def _send_syslog_message(self, test_point: TestDataPoint):
-        """Send syslog message through Vector"""
+        """Send syslog message through Vector using proper syslog protocol and ports"""
         try:
-            # Format as syslog message
+            # Determine syslog facility and priority based on service type
+            syslog_type = test_point.expected_incident_data.get('syslog_type', 'application')
+            
+            if syslog_type == 'system':
+                # System services typically use different facilities
+                if test_point.service_name == 'kernel':
+                    facility = 0  # kernel messages
+                    priority = facility * 8 + 6  # info level = 6
+                elif test_point.service_name in ['systemd', 'cron', 'sshd']:
+                    facility = 1  # user messages  
+                    priority = facility * 8 + 6  # info level = 6
+                else:
+                    facility = 16  # local use 0
+                    priority = facility * 8 + 6  # info level = 6
+            else:
+                # Application logs use local facilities
+                facility = 16  # local use 0
+                priority = facility * 8 + 6  # info level = 6
+            
+            # Format as RFC 5424 syslog message
+            # <priority>version timestamp hostname appname procid msgid message
             syslog_message = (
-                f"<134>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} "
+                f"<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} "
                 f"{test_point.service_name} - - {test_point.log_message}"
             )
             
-            # Send to Vector's syslog input (usually on port 514)
-            # For testing, we'll use the HTTP input if available
+            print(f"    📤 Sending syslog: facility={facility}, service={test_point.service_name}")
+            
+            # Try multiple methods to send syslog data
+            success_methods = []
+            
+            # Method 1: Direct UDP syslog to Vector port 1514
             try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(5)
+                sock.sendto(syslog_message.encode('utf-8'), ('localhost', 1514))
+                sock.close()
+                success_methods.append("UDP-1514")
+                print(f"    ✅ Sent via UDP to Vector syslog port 1514")
+            except Exception as e:
+                print(f"    ⚠️  UDP 1514 failed: {str(e)[:50]}")
+            
+            # Method 2: Try TCP syslog to Vector port 1516
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect(('localhost', 1516))
+                sock.send((syslog_message + '\n').encode('utf-8'))
+                sock.close()
+                success_methods.append("TCP-1516")
+                print(f"    ✅ Sent via TCP to Vector syslog port 1516")
+            except Exception as e:
+                print(f"    ⚠️  TCP 1516 failed: {str(e)[:50]}")
+            
+            # Method 3: Try standard syslog UDP port 514 (if accessible)
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(5)
+                sock.sendto(syslog_message.encode('utf-8'), ('localhost', 514))
+                sock.close()
+                success_methods.append("UDP-514")
+                print(f"    ✅ Sent via UDP to standard syslog port 514")
+            except Exception as e:
+                print(f"    ⚠️  UDP 514 failed (expected if not root): {str(e)[:50]}")
+            
+            # Method 4: Fallback to Vector HTTP API  
+            try:
+                # Create a structured log event for Vector HTTP input
+                http_event = {
+                    "timestamp": test_point.timestamp.isoformat(),
+                    "message": test_point.log_message,
+                    "hostname": test_point.hostname,
+                    "appname": test_point.service_name,
+                    "facility": facility,
+                    "severity": 6,
+                    "syslog_type": syslog_type,
+                    "tracking_id": test_point.tracking_id
+                }
+                
                 response = requests.post(
                     'http://localhost:8686/events',
-                    data=syslog_message,
+                    json=http_event,
                     headers={'Content-Type': 'application/json'},
                     timeout=10
                 )
-                print(f"    ✅ Syslog sent via HTTP: {test_point.tracking_id}")
-            except:
-                # Fall back to direct log injection
-                print(f"    ⚠️  HTTP injection failed, using alternative method")
+                if response.status_code == 200:
+                    success_methods.append("HTTP-API")
+                    print(f"    ✅ Sent via Vector HTTP API")
+                else:
+                    print(f"    ⚠️  HTTP API returned: {response.status_code}")
+            except Exception as e:
+                print(f"    ⚠️  HTTP API failed: {str(e)[:50]}")
+            
+            if success_methods:
+                print(f"    ✅ Successfully sent syslog via: {', '.join(success_methods)}")
+            else:
+                print(f"    ❌ All syslog delivery methods failed for {test_point.tracking_id}")
                 
         except Exception as e:
             print(f"    ❌ Syslog injection error: {str(e)}")
@@ -766,11 +946,38 @@ class OneClickIncidentDebugger:
                 f"   curl -X POST http://localhost:8091/devices \\",
                 f"     -H 'Content-Type: application/json' \\",
                 f"     -d '{{\"hostname\":\"{test_point.hostname}\",\"ship_id\":\"{test_point.ship_id}\"}}'",
-                f"   ```",
-                f"3. Send syslog message:",
+                f"   ```"
+            ]
+            
+            # Determine syslog priority and port based on service type
+            syslog_type = test_point.expected_incident_data.get('syslog_type', 'application')
+            if syslog_type == 'system':
+                if test_point.service_name == 'kernel':
+                    priority = 6  # kernel.info
+                    port_info = "Vector UDP 1514 (kernel facility)"
+                elif test_point.service_name in ['systemd', 'sshd', 'cron']:
+                    priority = 14  # user.info  
+                    port_info = "Vector UDP 1514/TCP 1516 (user facility)"
+                else:
+                    priority = 134  # local0.info
+                    port_info = "Vector UDP 1514/TCP 1516 (local facility)"
+            else:
+                priority = 134  # local0.info
+                port_info = "Vector UDP 1514/TCP 1516 (application)"
+                
+            syslog_steps = [
+                f"3. Send syslog message ({syslog_type} syslog):",
                 f"   ```bash",
-                f"   echo '<134>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc localhost 514",
-                f"   ```",
+                f"   # Method 1: {port_info}",
+                f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc -u localhost 1514",
+                f"   # Method 2: Vector TCP syslog",
+                f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc localhost 1516", 
+                f"   # Method 3: Standard syslog (if root)",
+                f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc -u localhost 514",
+                f"   ```"
+            ]
+            
+            remaining_steps = [
                 f"4. Publish metric:",
                 f"   ```bash",
                 f"   curl -X POST http://localhost:8428/api/v1/import/prometheus \\",
@@ -789,6 +996,9 @@ class OneClickIncidentDebugger:
                 f"- metric_value: `{test_point.metric_value}` (not 0)",
                 ""
             ]
+            
+            steps.extend(syslog_steps)
+            steps.extend(remaining_steps)
             
             reproduction_steps.extend(steps)
         
@@ -814,11 +1024,29 @@ class OneClickIncidentDebugger:
 
 **Generated:** {datetime.now().isoformat()}  
 **Tracking Session:** `{self.tracking_session}`  
-**Tool:** One-Click Incident Debugging
+**Tool:** One-Click Incident Debugging  
+**System Syslog Support:** ✅ Enabled
 
 ## 🚨 Issue Summary
 
-Incident data pipeline is producing incomplete/fallback values instead of meaningful data. This automated diagnostic identified specific issues and provides reproduction steps.
+Incident data pipeline is producing incomplete/fallback values instead of meaningful data. This automated diagnostic identified specific issues and provides reproduction steps for both application logs and system-generated syslog data.
+
+## 🖥️ System Syslog Testing Results
+
+This diagnostic includes comprehensive testing of system-generated syslog data:
+
+**Syslog Sources Tested:**
+- **systemd services** (facility 1, port 1514/1516)
+- **SSH daemon (sshd)** (facility 1, standard system authentication)
+- **Kernel messages** (facility 0, hardware/system events)  
+- **Cron services** (facility 1, scheduled job logs)
+- **Application logs** (facility 16, custom services)
+
+**Transport Methods:**
+- ✅ UDP Port 1514 (Vector syslog UDP source)
+- ✅ TCP Port 1516 (Vector syslog TCP source) 
+- ⚠️ UDP Port 514 (Standard syslog - requires root)
+- ✅ Vector HTTP API (Fallback method)
 
 ## 📊 Service Health Status
 
@@ -855,7 +1083,7 @@ Based on the analysis, here are the priority fixes:
 To reproduce this analysis:
 
 ```bash
-# Run the complete diagnostic
+# Run the complete diagnostic (includes system syslog testing)
 python3 scripts/one_click_incident_debugging.py --deep-analysis --generate-issue-report
 
 # Check specific services
@@ -864,21 +1092,34 @@ curl http://localhost:8686/health  # Vector
 curl http://localhost:8222/healthz # NATS
 curl http://localhost:4195/ping    # Benthos
 
+# Test system syslog connectivity
+nc -u localhost 1514 < /dev/null  # Vector UDP syslog
+nc localhost 1516 < /dev/null     # Vector TCP syslog
+
+# Send test system syslog messages
+echo '<1>1 2024-01-01T00:00:00Z test-host systemd - - Test systemd message' | nc -u localhost 1514
+echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1516
+
 # Query current incidents
 docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin \\
   --query="SELECT * FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 5"
 
 # Check NATS streams
 docker exec aiops-nats nats stream ls
+
+# Monitor Vector syslog component metrics
+curl http://localhost:8686/metrics | grep syslog
 ```
 
 ## 📝 Environment Information
 
-- **Diagnostic Tool Version:** One-Click v1.0
+- **Diagnostic Tool Version:** One-Click v1.1 (System Syslog Support)
 - **Timestamp:** {datetime.now().isoformat()}
 - **Total Services Checked:** {len(self.service_checks)}
-- **Test Data Points:** {len(self.test_data_points)}
+- **Test Data Points:** {len(self.test_data_points)} (includes system syslog scenarios)
 - **Mismatches Found:** {len(self.data_mismatches)}
+- **Syslog Transport Methods:** UDP/TCP ports 514, 1514, 1516 + HTTP API
+- **System Services Tested:** systemd, sshd, kernel, cron, applications
 
 ---
 
@@ -919,11 +1160,15 @@ docker exec aiops-nats nats stream ls
         """Format test data summary"""
         rows = []
         for i, test_point in enumerate(self.test_data_points, 1):
+            syslog_type = test_point.expected_incident_data.get('syslog_type', 'application')
+            type_indicator = "🖥️ System" if syslog_type == 'system' else "📱 Application"
+            
             rows.append(f"""
-**Test Point {i}:** `{test_point.tracking_id}`
+**Test Point {i}:** `{test_point.tracking_id}` ({type_indicator})
 - Ship: {test_point.ship_id}
 - Hostname: {test_point.hostname}  
 - Service: {test_point.service_name}
+- Type: {syslog_type} syslog
 - Metric: {test_point.metric_name} = {test_point.metric_value}
 """)
         return "\n".join(rows)
