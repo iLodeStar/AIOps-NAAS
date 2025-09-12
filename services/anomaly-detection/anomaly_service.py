@@ -244,10 +244,10 @@ class ClickHouseClient:
         try:
             query = f"""
             SELECT 
-                AVG(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as avg_value,
-                quantile(0.5)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as median_value,
-                quantile(0.95)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as p95_value,
-                quantile(0.99)(toFloat64OrZero(extractAll(message, r'[0-9]+\\.?[0-9]*')[1])) as p99_value,
+                AVG(toFloat64OrZero(extractAll(message, '[0-9]+\\.?[0-9]*')[1])) as avg_value,
+                quantile(0.5)(toFloat64OrZero(extractAll(message, '[0-9]+\\.?[0-9]*')[1])) as median_value,
+                quantile(0.95)(toFloat64OrZero(extractAll(message, '[0-9]+\\.?[0-9]*')[1])) as p95_value,
+                quantile(0.99)(toFloat64OrZero(extractAll(message, '[0-9]+\\.?[0-9]*')[1])) as p99_value,
                 COUNT(*) as sample_count
             FROM logs.raw 
             WHERE source = 'host_metrics'
