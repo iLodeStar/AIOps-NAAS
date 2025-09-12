@@ -417,36 +417,122 @@ class AnomalyDetectionService:
             # Extract tracking information from message
             message = log_data.get('message', '')
             tracking_id = log_data.get('tracking_id')
+            log_level = log_data.get('level', '').upper()
+            anomaly_severity = log_data.get('anomaly_severity', 'low').lower()
             
-            # Log processing for tracking
-            logger.info(f"Processing anomalous log: tracking_id={tracking_id}, message='{message[:100]}...'")
+            # CRITICAL FIX: Only process ERROR, CRITICAL, WARNING logs - skip INFO/DEBUG
+            if log_level in ['INFO', 'DEBUG', 'TRACE'] and anomaly_severity in ['info', 'low', 'debug']:
+                logger.debug(f"Skipping non-critical log: level={log_level}, severity={anomaly_severity}, tracking_id={tracking_id}")
+                return
+            
+            # CRITICAL FIX: Additional filtering for normal operational messages
+            if self._is_normal_operational_message(message):
+                logger.debug(f"Skipping normal operational message: {message[:50]}...")
+                return
+            
+            # Log processing for tracking (only for actual anomalies)
+            logger.info(f"Processing anomalous log: tracking_id={tracking_id}, level={log_level}, severity={anomaly_severity}, message='{message[:100]}...'")
+            
+            # CRITICAL FIX: Set appropriate anomaly score based on severity
+            anomaly_score = self._calculate_anomaly_score(log_level, anomaly_severity)
             
             # Create log-based anomaly event
             event = AnomalyEvent(
                 timestamp=datetime.now(),
                 metric_name="log_anomaly",
                 metric_value=1.0,  # Binary: anomaly detected or not
-                anomaly_score=0.9 if log_data.get('anomaly_severity') == 'critical' else 0.8,
+                anomaly_score=anomaly_score,
                 anomaly_type="log_pattern",
                 detector_name="log_pattern_detector",
                 threshold=0.7,
                 metadata={
                     "log_message": message,
                     "tracking_id": tracking_id,
-                    "log_level": log_data.get('level'),
+                    "log_level": log_level,
                     "source_host": log_data.get('host'),
                     "service": log_data.get('service'),
-                    "anomaly_severity": log_data.get('anomaly_severity', 'medium'),
-                    "original_timestamp": log_data.get('timestamp')
+                    "anomaly_severity": anomaly_severity,
+                    "original_timestamp": log_data.get('timestamp'),
+                    # CRITICAL FIX: Add ship_id, device_id extraction
+                    "ship_id": self._extract_ship_id(log_data),
+                    "device_id": self._extract_device_id(log_data)
                 },
                 labels=log_data.get('labels', {})
             )
             
             await self.publish_anomaly(event)
-            logger.info(f"Published log anomaly with tracking ID: {tracking_id}")
+            logger.info(f"Published log anomaly with tracking ID: {tracking_id}, score: {anomaly_score}")
             
         except Exception as e:
             logger.error(f"Error processing anomalous log: {e}")
+    
+    def _is_normal_operational_message(self, message: str) -> bool:
+        """Check if message is a normal operational log that shouldn't create incidents"""
+        normal_patterns = [
+            r'Metric: .+ = \d+',  # Normal metric reports
+            r'Health check',
+            r'Status: OK',
+            r'Connection established',
+            r'Startup complete',
+            r'Heartbeat',
+            r'Process started',
+            r'Configuration loaded'
+        ]
+        
+        for pattern in normal_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return True
+        return False
+    
+    def _calculate_anomaly_score(self, log_level: str, anomaly_severity: str) -> float:
+        """Calculate appropriate anomaly score based on log level and severity"""
+        if log_level in ['FATAL', 'CRITICAL'] or anomaly_severity == 'critical':
+            return 0.95
+        elif log_level == 'ERROR' or anomaly_severity in ['high', 'error']:
+            return 0.85
+        elif log_level in ['WARN', 'WARNING'] or anomaly_severity in ['medium', 'warning']:
+            return 0.75
+        else:
+            return 0.6
+    
+    def _extract_ship_id(self, log_data: dict) -> str:
+        """Extract ship_id from log data with intelligent fallbacks"""
+        # Try direct ship_id field first
+        if log_data.get('ship_id'):
+            return log_data['ship_id']
+        
+        # Try to derive from hostname
+        host = log_data.get('host', '')
+        if host and '-' in host:
+            # e.g., "dhruv-system-01" -> "dhruv-ship"
+            return host.split('-')[0] + '-ship'
+        elif host and host != 'unknown':
+            return host + '-ship'
+        
+        # Try labels
+        labels = log_data.get('labels', {})
+        if labels.get('ship_id'):
+            return labels['ship_id']
+        
+        return 'unknown-ship'
+    
+    def _extract_device_id(self, log_data: dict) -> str:
+        """Extract device_id from log data"""
+        # Try direct device_id field
+        if log_data.get('device_id'):
+            return log_data['device_id']
+        
+        # Try to derive from hostname  
+        host = log_data.get('host', '')
+        if host and host != 'unknown':
+            return host
+        
+        # Try service name
+        service = log_data.get('service', '')
+        if service and service != 'unknown':
+            return service
+        
+        return 'unknown-device'
     
     async def publish_anomaly(self, event: AnomalyEvent):
         """Publish anomaly event to NATS"""
