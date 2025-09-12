@@ -501,20 +501,22 @@ pipeline:
 
     # CRITICAL FIX: Enhanced suppression check - prevent duplicate incidents with multiple keys
     - try:
-      - cache:
-          resource: "suppression_cache"
-          operator: "get"
-          # More granular suppression key including metric_name and service
-          key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
-          drop_on_err: true
+        drop_on_err: true
+        processors:
+          - cache:
+              resource: "suppression_cache"
+              operator: "get"
+              # More granular suppression key including metric_name and service
+              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
 
     # CRITICAL FIX: Additional suppression for tracking_id-based deduplication
     - try:
-      - cache:
-          resource: "tracking_suppression_cache"
-          operator: "get"
-          key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
-          drop_on_err: true
+        drop_on_err: true
+        processors:
+          - cache:
+              resource: "tracking_suppression_cache"
+              operator: "get"
+              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
 
     # Only process if not suppressed by either check
     - switch:
