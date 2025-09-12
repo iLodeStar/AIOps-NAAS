@@ -1,4 +1,4 @@
-.PHONY: up up-all up-service status logs down collect-logs fix creds simulate up-keycloak
+.PHONY: up up-all up-service status logs down collect-logs fix creds simulate up-keycloak debug-incident
 
 up:
 	bash scripts/aiops.sh
@@ -35,16 +35,21 @@ creds:
 simulate:
 	bash scripts/simulate_data.sh
 
+debug-incident:
+	@echo "🚀 Starting One-Click Incident Debugging Tool..."
+	bash scripts/one_click_debug.sh
+
 help:
 	@echo "AIOps-NAAS Makefile targets:"
-	@echo "  up           - Interactive wizard (default)"
-	@echo "  up-all       - Start all services"
-	@echo "  up-service   - Start single service (set SERVICE=name)"
-	@echo "  up-keycloak  - Start with Keycloak SSO"
-	@echo "  status       - Show service status"
-	@echo "  logs         - View service logs (set SERVICE=name)"
-	@echo "  down         - Stop all services"
-	@echo "  collect-logs - Collect logs for all services"
-	@echo "  fix          - Run auto-fixes"
-	@echo "  creds        - Set credentials interactively"
-	@echo "  simulate     - Run data simulation"
+	@echo "  up              - Interactive wizard (default)"
+	@echo "  up-all          - Start all services"
+	@echo "  up-service      - Start single service (set SERVICE=name)"
+	@echo "  up-keycloak     - Start with Keycloak SSO"
+	@echo "  status          - Show service status"
+	@echo "  logs            - View service logs (set SERVICE=name)"
+	@echo "  down            - Stop all services"
+	@echo "  collect-logs    - Collect logs for all services"
+	@echo "  fix             - Run auto-fixes"
+	@echo "  creds           - Set credentials interactively"
+	@echo "  simulate        - Run data simulation"
+	@echo "  debug-incident  - One-click incident data debugging 🔍"
