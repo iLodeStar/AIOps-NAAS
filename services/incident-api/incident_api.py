@@ -185,7 +185,7 @@ class IncidentAPIService:
         return "unknown-ship"
     
     async def store_incident(self, incident_data: Dict[str, Any]):
-        """Store incident in ClickHouse"""
+        """Store incident in ClickHouse with enhanced metadata handling"""
         try:
             # Resolve ship_id using device registry integration
             resolved_ship_id = await self.resolve_ship_id(incident_data)
@@ -194,6 +194,36 @@ class IncidentAPIService:
             timeline_json = json.dumps(incident_data.get('timeline', []))
             correlated_events_json = json.dumps(incident_data.get('correlated_events', []))
             metadata_json = json.dumps(incident_data.get('metadata', {}))
+            
+            # CRITICAL FIX: Extract and validate all fields properly
+            metric_value = incident_data.get('metric_value', 0.0)
+            if not isinstance(metric_value, (int, float)):
+                try:
+                    metric_value = float(metric_value) if metric_value else 0.0
+                except (ValueError, TypeError):
+                    metric_value = 0.0
+            
+            anomaly_score = incident_data.get('anomaly_score', 0.0)
+            if not isinstance(anomaly_score, (int, float)):
+                try:
+                    anomaly_score = float(anomaly_score) if anomaly_score else 0.0
+                except (ValueError, TypeError):
+                    anomaly_score = 0.0
+            
+            # CRITICAL FIX: Ensure proper service field handling
+            service_name = incident_data.get('service', 'unknown_service')
+            if not service_name or service_name == '':
+                service_name = 'unknown_service'
+                
+            # CRITICAL FIX: Better incident type mapping
+            incident_type = incident_data.get('incident_type', 'single_anomaly')
+            if not incident_type or incident_type == '':
+                incident_type = 'single_anomaly'
+                
+            # CRITICAL FIX: Proper severity handling
+            incident_severity = incident_data.get('incident_severity', 'medium')
+            if incident_severity in ['info', 'debug']:
+                incident_severity = 'low'  # Map info/debug to low severity
             
             # Insert incident into ClickHouse
             query = """
@@ -209,31 +239,33 @@ class IncidentAPIService:
             values = (
                 incident_data.get('incident_id', str(uuid.uuid4())),
                 incident_data.get('event_type', 'incident'),
-                incident_data.get('incident_type', 'unknown'),
-                incident_data.get('incident_severity', 'info'),
+                incident_type,
+                incident_severity,
                 resolved_ship_id,  # Use resolved ship_id instead of hardcoded fallback
-                incident_data.get('service', 'unknown_service'),  # Use consistent fallback from Benthos
+                service_name,
                 incident_data.get('status', 'open'),
                 incident_data.get('acknowledged', False),
                 datetime.fromisoformat(incident_data['created_at'].replace('Z', '+00:00')) if 'created_at' in incident_data else datetime.now(),
                 datetime.fromisoformat(incident_data['updated_at'].replace('Z', '+00:00')) if 'updated_at' in incident_data else datetime.now(),
                 incident_data.get('correlation_id', ''),
                 datetime.now(),
-                incident_data.get('metric_name', ''),
-                incident_data.get('metric_value', 0.0),
-                incident_data.get('anomaly_score', 0.0),
+                incident_data.get('metric_name', 'unknown_metric'),  # Consistent with Benthos
+                metric_value,
+                anomaly_score,
                 incident_data.get('detector_name', ''),
                 correlated_events_json,
                 timeline_json,
-                incident_data.get('suggested_runbooks', []),
+                incident_data.get('suggested_runbooks', ['generic_investigation']),
                 metadata_json
             )
             
             self.clickhouse_client.execute(query, [values])
-            logger.info(f"Stored incident {values[0]} with ship_id {resolved_ship_id} in ClickHouse")
+            logger.info(f"Stored incident {values[0]} - type: {incident_type}, severity: {incident_severity}, ship_id: {resolved_ship_id}, metric: {incident_data.get('metric_name', 'unknown')}, value: {metric_value}")
             
         except Exception as e:
             logger.error(f"Error storing incident in ClickHouse: {e}")
+            logger.error(f"Incident data causing error: {incident_data}")
+            raise
     
     def get_incidents(self, limit: int = 50, status: Optional[str] = None, ship_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Retrieve incidents from ClickHouse"""

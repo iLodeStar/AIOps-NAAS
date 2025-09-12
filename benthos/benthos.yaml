@@ -34,6 +34,28 @@ input:
 # Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
   processors:
+    # CRITICAL FIX: Filter out INFO/DEBUG level events early to prevent incident creation
+    - switch:
+      - check: |
+          let severity = if this.severity != null { this.severity.lowercase() } else if this.level != null { this.level.lowercase() } else if this.metadata != null && this.metadata.anomaly_severity != null { this.metadata.anomaly_severity.lowercase() } else { "info" }
+          let anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.0 }
+          
+          # Skip INFO/DEBUG logs unless they have high anomaly scores
+          (severity == "info" || severity == "debug" || severity == "trace") && anomaly_score < 0.7
+        processors:
+          - mapping: "root = deleted()"  # Drop the event
+      
+      # Process all other events (ERROR, CRITICAL, WARNING, or high-score INFO)  
+      - processors:
+          - mapping: |
+              # Log what we're processing for debugging
+              root.benthos_processing = {
+                "filtered_in": true,
+                "severity": if this.severity != null { this.severity } else if this.level != null { this.level } else { "unknown" },
+                "anomaly_score": if this.anomaly_score != null { this.anomaly_score } else { 0.0 },
+                "processing_timestamp": now()
+              }
+    
     # Input validation and standardization with comprehensive null handling
     - mapping: |
         # Log raw input for debugging purposes
@@ -228,7 +250,7 @@ pipeline:
           0.4
         }
         
-        # Normalize service information
+        # Normalize service information with enhanced metadata extraction
         root.service = if this.service != null && this.service != "" {
           this.service
         } else if this.metadata != null && this.metadata.service != null && this.metadata.service != "" {
@@ -239,6 +261,41 @@ pipeline:
           this.application
         } else {
           "unknown_service"
+        }
+        
+        # CRITICAL FIX: Extract and preserve metric values from metadata
+        root.metric_value = if this.metric_value != null {
+          this.metric_value
+        } else if this.value != null {
+          this.value  
+        } else if this.metadata != null && this.metadata.metric_value != null {
+          this.metadata.metric_value
+        } else {
+          0.0
+        }
+        
+        # CRITICAL FIX: Extract device_id from multiple sources
+        root.device_id = if this.device_id != null && this.device_id != "" {
+          this.device_id
+        } else if this.metadata != null && this.metadata.device_id != null && this.metadata.device_id != "" {
+          this.metadata.device_id
+        } else if this.host != null && this.host != "" && this.host != "unknown" {
+          this.host
+        } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" {
+          this.labels.instance
+        } else {
+          "unknown-device"
+        }
+        
+        # CRITICAL FIX: Extract tracking_id for traceability
+        root.tracking_id = if this.tracking_id != null && this.tracking_id != "" {
+          this.tracking_id
+        } else if this.metadata != null && this.metadata.tracking_id != null && this.metadata.tracking_id != "" {
+          this.metadata.tracking_id
+        } else if this.correlation_id != null && this.correlation_id != "" {
+          this.correlation_id
+        } else {
+          null
         }
         
         # Safe incident type handling
@@ -442,27 +499,46 @@ pipeline:
         root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else { "unknown-ship" }
         root.incident_type = if this.incident_type != null && this.incident_type != "" { this.incident_type } else { "single_anomaly" }
 
-    # Suppression check - prevent duplicate incidents
+    # CRITICAL FIX: Enhanced suppression check - prevent duplicate incidents with multiple keys
     - try:
       - cache:
           resource: "suppression_cache"
           operator: "get"
-          key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
+          # More granular suppression key including metric_name and service
+          key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
+          drop_on_err: true
 
-    # Only process if not suppressed
+    # CRITICAL FIX: Additional suppression for tracking_id-based deduplication
+    - try:
+      - cache:
+          resource: "tracking_suppression_cache"
+          operator: "get"
+          key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+          drop_on_err: true
+
+    # Only process if not suppressed by either check
     - switch:
-      - check: meta("cache_result") == null || meta("cache_result") == ""
+      - check: (meta("cache_result") == null || meta("cache_result") == "") && (meta("tracking_suppression_cache") == null || meta("tracking_suppression_cache") == "")
         processors:
-          # Mark as processed to suppress similar incidents
+          # CRITICAL FIX: More granular suppression with longer TTL for similar incidents
           - cache:
               resource: "suppression_cache"
               operator: "set" 
-              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") }"
-              value: "suppressed"
-              ttl: "300s"  # Suppress for 5 minutes
+              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
+              value: "${! json(\"incident_id\") }"  # Store the incident ID for reference
+              ttl: "900s"  # Suppress for 15 minutes (longer for better deduplication)
               
-          # Create final incident event
+          # CRITICAL FIX: Tracking-based suppression
+          - cache:
+              resource: "tracking_suppression_cache"
+              operator: "set"
+              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+              value: "${! json(\"incident_id\") }"
+              ttl: "1800s"  # Suppress for 30 minutes for tracking-based deduplication
+              
+          # Create final incident event with complete metadata
           - mapping: |
+              # Core incident fields
               root.event_type = "incident"
               root.incident_id = uuid_v4()
               root.created_at = now()
@@ -470,19 +546,52 @@ pipeline:
               root.status = "open"
               root.acknowledged = false
               
-              # Create timeline entry
+              # CRITICAL FIX: Ensure all required fields are populated from processed data
+              root.incident_type = if this.incident_type != null && this.incident_type != "" { this.incident_type } else { "single_anomaly" }
+              root.incident_severity = if this.incident_severity != null && this.incident_severity != "" { this.incident_severity } else { "medium" }
+              root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else { "unknown-ship" }
+              root.service = if this.service != null && this.service != "" { this.service } else { "unknown_service" }
+              root.metric_name = if this.metric_name != null && this.metric_name != "" { this.metric_name } else { "unknown_metric" }
+              root.metric_value = if this.metric_value != null { this.metric_value } else { 0.0 }
+              root.anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.5 }
+              root.device_id = if this.device_id != null && this.device_id != "" { this.device_id } else { "unknown-device" }
+              root.correlation_id = if this.correlation_id != null && this.correlation_id != "" { this.correlation_id } else { uuid_v4() }
+              
+              # CRITICAL FIX: Include tracking information for traceability
+              root.tracking_id = if this.tracking_id != null && this.tracking_id != "" { this.tracking_id } else { null }
+              
+              # CRITICAL FIX: Enhanced timeline with more context
               root.timeline = [
                 {
                   "timestamp": now(),
                   "event": "incident_created",
-                  "description": "Incident created by anomaly correlation",
-                  "source": "benthos_correlation"
+                  "description": "Incident created by anomaly correlation - " + root.incident_type + " on " + root.ship_id,
+                  "source": "benthos_correlation",
+                  "metadata": {
+                    "anomaly_score": root.anomaly_score,
+                    "metric_name": root.metric_name,
+                    "metric_value": root.metric_value,
+                    "tracking_id": root.tracking_id,
+                    "correlation_confidence": if this.correlation_confidence != null { this.correlation_confidence } else { 0.6 }
+                  }
                 }
               ]
               
-              # Enhanced runbook suggestions based on incident type
+              # CRITICAL FIX: Enhanced metadata including all source data
+              root.metadata = {
+                "correlation_confidence": if this.correlation_confidence != null { this.correlation_confidence } else { 0.6 },
+                "event_source": if this.event_source != null { this.event_source } else { "unknown" },
+                "host": if this.host != null { this.host } else { "unknown" },
+                "original_timestamp": if this.timestamp != null { this.timestamp } else { now() },
+                "processing_metadata": if this.input_metadata != null { this.input_metadata } else { {} },
+                "correlated_events_count": if this.correlated_events != null { this.correlated_events.length() } else { 1 },
+                "ship_id_source": if this.ship_id_source != null { this.ship_id_source } else { "unknown" },
+                "registry_metadata": if this.registry_metadata != null { this.registry_metadata } else { {} }
+              }
+              
+              # Enhanced runbook suggestions based on incident type and context
               root.suggested_runbooks = if this.incident_type == "resource_pressure" {
-                ["investigate_high_resource_usage", "scale_resources"]
+                ["investigate_high_resource_usage", "scale_resources", "check_system_limits"]
               } else if this.incident_type == "weather_degradation" {
                 ["weather_response_protocol", "switch_backup_comm", "adjust_satellite_parameters"]
               } else if this.incident_type == "communication_issues" {
@@ -490,13 +599,15 @@ pipeline:
               } else if this.incident_type == "system_overload" {
                 ["load_balancing", "process_optimization", "resource_scaling"]
               } else if this.incident_type == "application_system_correlation" {
-                ["investigate_app_system_correlation", "check_resource_limits"]
+                ["investigate_app_system_correlation", "check_resource_limits", "review_application_logs"]
               } else if this.metric_name == "cpu_usage" {
-                ["investigate_cpu_usage"]  
+                ["investigate_cpu_usage", "check_cpu_intensive_processes"]  
               } else if this.metric_name == "memory_usage" {
-                ["investigate_memory_usage"]
+                ["investigate_memory_usage", "check_memory_leaks"]
+              } else if this.event_source == "application_logs" {
+                ["review_application_logs", "check_application_health", "investigate_error_patterns"]
               } else {
-                ["generic_investigation"]
+                ["generic_investigation", "check_system_health"]
               }
 
       # Drop suppressed events
@@ -528,7 +639,12 @@ cache_resources:
       
   - label: "suppression_cache"
     memory:
-      default_ttl: "300s"
+      default_ttl: "900s"  # Increased TTL for better deduplication
+      
+  # CRITICAL FIX: New cache for tracking-based suppression
+  - label: "tracking_suppression_cache"
+    memory:
+      default_ttl: "1800s"  # 30 minutes for tracking-based deduplication
 
 # Metrics and monitoring
 metrics:
