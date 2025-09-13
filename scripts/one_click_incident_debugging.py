@@ -885,6 +885,20 @@ class OneClickIncidentDebugger:
         """Check general data quality issues in ClickHouse independent of test data"""
         print("  🔍 Checking general data quality in ClickHouse...")
         
+        # First, check if critical services are down and predict issues
+        critical_services_down = []
+        for service_check in self.service_checks:
+            if service_check.status != 'healthy':
+                if service_check.service_name == 'Device Registry':
+                    critical_services_down.append('device_registry')
+                elif service_check.service_name == 'Incident API':
+                    critical_services_down.append('incident_api')
+        
+        # If critical services are down, predict data quality issues
+        if critical_services_down:
+            print(f"    ⚠️ Critical services down: {', '.join(critical_services_down)}")
+            self._create_predicted_mismatches(critical_services_down)
+        
         try:
             # Query recent incidents to check for fallback values
             query = "SELECT ship_id, service, metric_name, metric_value, message FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 100"
@@ -903,16 +917,75 @@ class OneClickIncidentDebugger:
                             self._analyze_general_data_quality(result.stdout.strip())
                         else:
                             print("    ⚠️ No incidents found in database - this may indicate data pipeline issues")
-                            self._add_no_data_mismatch()
+                            if not critical_services_down:  # Only add if we haven't already predicted issues
+                                self._add_no_data_mismatch()
                         break
                         
                 except Exception:
                     continue
             else:
                 print("    ❌ Could not connect to ClickHouse to check data quality")
+                # If we can't connect to ClickHouse but some services claim to be healthy, this is suspicious
+                if not critical_services_down:
+                    self._add_clickhouse_connectivity_mismatch()
                 
         except Exception as e:
             print(f"    ❌ General data quality check error: {str(e)}")
+
+    def _create_predicted_mismatches(self, critical_services_down: List[str]):
+        """Create predicted mismatches based on critical services being down"""
+        print("    🔮 Predicting data quality issues based on service status...")
+        
+        if 'device_registry' in critical_services_down:
+            print("    📋 Device Registry is down - expecting ship_id resolution failures")
+            self.data_mismatches.append(DataMismatch(
+                field_name='ship_id',
+                expected_value='actual ship identifiers (e.g., test-ship-alpha)',
+                actual_value='unknown-ship (predicted due to Device Registry being down)',
+                service_responsible='Device Registry',
+                root_cause='Device Registry service is not running or not accessible',
+                fix_steps=[
+                    'Start the Device Registry service: docker-compose restart device-registry',
+                    'Check Device Registry health: curl http://localhost:8091/health',
+                    'Verify device registry database is accessible',
+                    'Ensure Benthos configuration includes device registry lookups',
+                    'Register test devices for validation'
+                ]
+            ))
+        
+        if 'incident_api' in critical_services_down:
+            print("    📋 Incident API is down - expecting incident processing failures")
+            self.data_mismatches.append(DataMismatch(
+                field_name='incident_processing',
+                expected_value='incidents stored and queryable in ClickHouse',
+                actual_value='incidents may not be properly processed (predicted due to Incident API being down)',
+                service_responsible='Incident API',
+                root_cause='Incident API service is not running or not accessible',
+                fix_steps=[
+                    'Start the Incident API service: docker-compose restart incident-api',
+                    'Check Incident API health: curl http://localhost:9081/health',
+                    'Verify NATS connectivity for incident events',
+                    'Check ClickHouse connectivity from Incident API',
+                    'Verify incident processing workflow'
+                ]
+            ))
+
+    def _add_clickhouse_connectivity_mismatch(self):
+        """Add a mismatch for ClickHouse connectivity issues despite service claims"""
+        self.data_mismatches.append(DataMismatch(
+            field_name='database_connectivity',
+            expected_value='accessible ClickHouse database with incident data',
+            actual_value='ClickHouse not accessible despite health checks passing',
+            service_responsible='ClickHouse / Infrastructure',
+            root_cause='ClickHouse connectivity issues or credential problems',
+            fix_steps=[
+                'Verify ClickHouse container is running: docker ps | grep clickhouse',
+                'Check ClickHouse health: curl http://localhost:8123/ping',
+                'Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin',
+                'Check ClickHouse logs: docker logs aiops-clickhouse',
+                'Verify database initialization and table creation'
+            ]
+        ))
 
     def _analyze_general_data_quality(self, incidents_data: str):
         """Analyze general data quality issues"""
