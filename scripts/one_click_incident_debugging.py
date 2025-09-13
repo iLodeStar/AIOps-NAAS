@@ -221,7 +221,7 @@ class OneClickIncidentDebugger:
         ports_to_check = [
             (514, 'UDP', 'Standard syslog'),
             (1514, 'UDP', 'Vector syslog UDP'),
-            (1516, 'TCP', 'Vector syslog TCP')
+            (1515, 'TCP', 'Vector syslog TCP')
         ]
         
         for port, protocol, description in ports_to_check:
@@ -499,18 +499,18 @@ class OneClickIncidentDebugger:
             except Exception as e:
                 print(f"    ⚠️  UDP 1514 failed: {str(e)[:50]}")
             
-            # Method 2: Try TCP syslog to Vector port 1516
+            # Method 2: Try TCP syslog to Vector port 1515
             try:
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
-                sock.connect(('localhost', 1516))
+                sock.connect(('localhost', 1515))
                 sock.send((syslog_message + '\n').encode('utf-8'))
                 sock.close()
-                success_methods.append("TCP-1516")
-                print(f"    ✅ Sent via TCP to Vector syslog port 1516")
+                success_methods.append("TCP-1515")
+                print(f"    ✅ Sent via TCP to Vector syslog port 1515")
             except Exception as e:
-                print(f"    ⚠️  TCP 1516 failed: {str(e)[:50]}")
+                print(f"    ⚠️  TCP 1515 failed: {str(e)[:50]}")
             
             # Method 3: Try standard syslog UDP port 514 (if accessible)
             try:
@@ -1221,13 +1221,13 @@ class OneClickIncidentDebugger:
                     port_info = "Vector UDP 1514 (kernel facility)"
                 elif test_point.service_name in ['systemd', 'sshd', 'cron']:
                     priority = 14  # user.info  
-                    port_info = "Vector UDP 1514/TCP 1516 (user facility)"
+                    port_info = "Vector UDP 1514/TCP 1515 (user facility)"
                 else:
                     priority = 134  # local0.info
-                    port_info = "Vector UDP 1514/TCP 1516 (local facility)"
+                    port_info = "Vector UDP 1514/TCP 1515 (local facility)"
             else:
                 priority = 134  # local0.info
-                port_info = "Vector UDP 1514/TCP 1516 (application)"
+                port_info = "Vector UDP 1514/TCP 1515 (application)"
                 
             syslog_steps = [
                 f"3. Send syslog message ({syslog_type} syslog):",
@@ -1235,7 +1235,7 @@ class OneClickIncidentDebugger:
                 f"   # Method 1: {port_info}",
                 f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc -u localhost 1514",
                 f"   # Method 2: Vector TCP syslog",
-                f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc localhost 1516", 
+                f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc localhost 1515", 
                 f"   # Method 3: Standard syslog (if root)",
                 f"   echo '<{priority}>1 {test_point.timestamp.isoformat()}Z {test_point.hostname} {test_point.service_name} - - {test_point.log_message}' | nc -u localhost 514",
                 f"   ```"
@@ -1300,7 +1300,7 @@ Incident data pipeline is producing incomplete/fallback values instead of meanin
 This diagnostic includes comprehensive testing of system-generated syslog data:
 
 **Syslog Sources Tested:**
-- **systemd services** (facility 1, port 1514/1516)
+- **systemd services** (facility 1, port 1514/1515)
 - **SSH daemon (sshd)** (facility 1, standard system authentication)
 - **Kernel messages** (facility 0, hardware/system events)  
 - **Cron services** (facility 1, scheduled job logs)
@@ -1308,7 +1308,7 @@ This diagnostic includes comprehensive testing of system-generated syslog data:
 
 **Transport Methods:**
 - ✅ UDP Port 1514 (Vector syslog UDP source)
-- ✅ TCP Port 1516 (Vector syslog TCP source) 
+- ✅ TCP Port 1515 (Vector syslog TCP source) 
 - ⚠️ UDP Port 514 (Standard syslog - requires root)
 - ✅ Vector HTTP API (Fallback method)
 
@@ -1358,11 +1358,11 @@ curl http://localhost:4195/ping    # Benthos
 
 # Test system syslog connectivity
 nc -u localhost 1514 < /dev/null  # Vector UDP syslog
-nc localhost 1516 < /dev/null     # Vector TCP syslog
+nc localhost 1515 < /dev/null     # Vector TCP syslog
 
 # Send test system syslog messages
 echo '<1>1 2024-01-01T00:00:00Z test-host systemd - - Test systemd message' | nc -u localhost 1514
-echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1516
+echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1515
 
 # Query current incidents
 docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin \\
@@ -1382,7 +1382,7 @@ curl http://localhost:8686/metrics | grep syslog
 - **Total Services Checked:** {len(self.service_checks)}
 - **Test Data Points:** {len(self.test_data_points)} (includes system syslog scenarios)
 - **Mismatches Found:** {len(self.data_mismatches)}
-- **Syslog Transport Methods:** UDP/TCP ports 514, 1514, 1516 + HTTP API
+- **Syslog Transport Methods:** UDP/TCP ports 514, 1514, 1515 + HTTP API
 - **System Services Tested:** systemd, sshd, kernel, cron, applications
 
 ---
