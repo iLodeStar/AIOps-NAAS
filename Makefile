@@ -1,4 +1,4 @@
-.PHONY: up up-all up-service status logs down collect-logs fix creds simulate up-keycloak debug-incident
+.PHONY: up up-all up-service status logs down collect-logs fix creds simulate up-keycloak debug-incident diagnose compatibility-monitor
 
 up:
 	bash scripts/aiops.sh
@@ -39,6 +39,20 @@ debug-incident:
 	@echo "🚀 Starting One-Click Incident Debugging Tool..."
 	bash scripts/one_click_debug.sh
 
+diagnose:
+	@echo "🩺 Starting User-Friendly Diagnostic Tool..."
+	@echo "Available modes: sanity, regression, surveillance, automation"
+	@if [ -z "$$MODE" ]; then \
+		echo "Usage: make diagnose MODE=<mode>"; \
+		echo "Example: make diagnose MODE=sanity"; \
+		exit 1; \
+	fi
+	python3 scripts/user_friendly_diagnostics.py --mode "$$MODE"
+
+compatibility-monitor:
+	@echo "🔍 Starting System Compatibility Monitor..."
+	python3 services/system-compatibility-monitor/compatibility_monitor.py
+
 help:
 	@echo "AIOps-NAAS Makefile targets:"
 	@echo "  up              - Interactive wizard (default)"
@@ -53,3 +67,5 @@ help:
 	@echo "  creds           - Set credentials interactively"
 	@echo "  simulate        - Run data simulation"
 	@echo "  debug-incident  - One-click incident data debugging 🔍"
+	@echo "  diagnose        - User-friendly diagnostic tool (set MODE=sanity|regression|surveillance|automation) 🩺"
+	@echo "  compatibility-monitor - Start system compatibility monitoring 🔍"

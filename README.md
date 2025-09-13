@@ -223,6 +223,36 @@ If you encounter build failures with v0.4 services (capacity-forecasting, fleet-
 - `No matching distribution found`: SSL/network issue - try rebuilding later or check internet connection
 
 ## Testing
+
+**User-Friendly Diagnostic Tools**: For non-technical users to validate system operation:
+
+```bash
+# Quick system health check (recommended for daily use)
+make diagnose MODE=sanity
+
+# Comprehensive system testing (weekly validation)
+make diagnose MODE=regression
+
+# System monitoring without test injection (troubleshooting)
+make diagnose MODE=surveillance
+
+# Full autonomous monitoring with insights (monthly certification)
+make diagnose MODE=automation
+
+# Or use directly:
+python3 scripts/user_friendly_diagnostics.py --mode sanity
+```
+
+**System Compatibility Monitoring**: Continuous monitoring of system compatibility across different OS types and message formats:
+
+```bash
+# Start compatibility monitoring service
+make compatibility-monitor
+
+# Or run single compatibility test
+python3 services/system-compatibility-monitor/compatibility_monitor.py --test-mode
+```
+
 **Comprehensive Soak Testing**: Validate system operation with realistic workloads:
 
 ```bash
@@ -246,7 +276,7 @@ python3 test_v03_integration.py
 python3 test_v04_integration.py
 ```
 
-For complete testing procedures, see **[Test Plan](docs/testing/test-plan.md)**.
+For complete testing procedures, see **[Test Plan](docs/testing/test-plan.md)** and **[User-Friendly Diagnostic Guide](docs/user-guides/diagnostic-tool-guide.md)**.
 
 ## v1.0 Self-Learning Closed-Loop Automation (NEW!)
 **Complete v1.0 implementation now available!**
