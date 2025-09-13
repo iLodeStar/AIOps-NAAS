@@ -1,0 +1,159 @@
+{
+  "test_start": "2025-09-13 09:52:38.645823",
+  "test_duration_minutes": 2,
+  "scenarios_tested": [
+    {
+      "scenario": "high_cpu_router_issue",
+      "success": false,
+      "steps": [
+        {
+          "step": "data_generation",
+          "success": true,
+          "metrics_generated": 5,
+          "events_generated": 2,
+          "weather_available": true
+        },
+        {
+          "step": "anomaly_detection",
+          "success": true,
+          "anomalies_detected": 2
+        },
+        {
+          "step": "event_correlation",
+          "success": true,
+          "correlations_created": 2
+        },
+        {
+          "step": "rca_analysis",
+          "success": false,
+          "rca_analyses": 2
+        },
+        {
+          "step": "servicenow_creation",
+          "success": true,
+          "ticket_number": "INC5057299"
+        },
+        {
+          "step": "remediation_execution",
+          "success": true,
+          "action": "restart_high_cpu_processes",
+          "result": {
+            "action_type": "restart_process",
+            "target": "routing-daemon",
+            "os_type": "ubuntu",
+            "results": [
+              {
+                "command": "systemctl restart routing-daemon",
+                "dry_run": true,
+                "would_execute": true,
+                "os_type": "ubuntu"
+              },
+              {
+                "command": "service routing-daemon restart",
+                "dry_run": true,
+                "would_execute": true,
+                "os_type": "ubuntu"
+              }
+            ],
+            "overall_success": true,
+            "dry_run": true
+          }
+        },
+        {
+          "step": "incident_closure",
+          "success": true,
+          "resolution": "restart_high_cpu_processes"
+        },
+        {
+          "step": "report_generation",
+          "success": true,
+          "report_id": "2daf0fc3-2842-43f7-b919-00d23e5ea961"
+        }
+      ],
+      "incident": "IncidentEvent(incident_id='2daf0fc3-2842-43f7-b919-00d23e5ea961', timestamp=datetime.datetime(2025, 9, 13, 9, 52, 38, 745726), severity=<IncidentSeverity.HIGH: '2'>, title='High CPU utilization on router-comm-04-ubuntu', description='Router experiencing high CPU usage. Root cause: High CPU utilization\\n\\nExternal Context:\\nWeather conditions: 31.010742973533127\u00b0C, 6.785325543308511 km/h wind, partly_cloudy\\nSystem Context:\\nSystem Load: 0.37, Available Memory: 14GB', affected_system='router-comm-04-ubuntu', root_cause='High CPU utilization', confidence_score=0.6, metrics=[SNMPMetric(oid='1.3.6.1.4.1.2021.11.9.0', hostname='router-comm-04-ubuntu', value=100, timestamp=datetime.datetime(2025, 9, 13, 9, 52, 38, 645916), metric_type='cpu_percent', os_type='ubuntu'), SNMPMetric(oid='1.3.6.1.4.1.2021.11.9.0', hostname='router-comm-04-ubuntu', value=89.11537003053364, timestamp=datetime.datetime(2025, 9, 13, 9, 53, 8, 645916), metric_type='cpu_percent', os_type='ubuntu'), SNMPMetric(oid='1.3.6.1.4.1.2021.11.9.0', hostname='router-comm-04-ubuntu', value=93.997870917538, timestamp=datetime.datetime(2025, 9, 13, 9, 53, 38, 645916), metric_type='cpu_percent', os_type='ubuntu'), SNMPMetric(oid='1.3.6.1.4.1.2021.11.9.0', hostname='router-comm-04-ubuntu', value=88.16192211377198, timestamp=datetime.datetime(2025, 9, 13, 9, 54, 8, 645916), metric_type='cpu_percent', os_type='ubuntu'), SNMPMetric(oid='1.3.6.1.4.1.2021.11.9.0', hostname='router-comm-04-ubuntu', value=100, timestamp=datetime.datetime(2025, 9, 13, 9, 54, 38, 645916), metric_type='cpu_percent', os_type='ubuntu')], syslog_events=[SyslogEvent(timestamp=datetime.datetime(2025, 9, 13, 9, 52, 38, 645992), hostname='router-engine-02-ubuntu', facility='daemon', severity='warning', process='system-monitor', pid=2329, message='High CPU usage detected: 86%', os_type='ubuntu'), SyslogEvent(timestamp=datetime.datetime(2025, 9, 13, 9, 53, 8, 645992), hostname='router-engine-02-ubuntu', facility='kernel', severity='error', process='ksoftirqd/0', pid=42, message='CPU soft lockup detected on CPU 0', os_type='ubuntu')], weather_context=WeatherContext(timestamp=datetime.datetime(2025, 9, 13, 9, 52, 38, 745535), latitude=25.7617, longitude=-80.1918, temperature_c=31.010742973533127, humidity_percent=67.60762434454602, wind_speed_kmh=6.785325543308511, precipitation_mm=0.15762129099899325, weather_condition='partly_cloudy'), remediation_actions=['restart_high_cpu_processes'], status='resolved')",
+      "servicenow_ticket": "ServiceNowTicket(number='INC5057299', state='6', severity='2', category='Network', subcategory='Router', short_description='High CPU utilization on router-comm-04-ubuntu', description='Router experiencing high CPU usage. Root cause: High CPU utilization\\n\\nExternal Context:\\nWeather conditions: 31.010742973533127\u00b0C, 6.785325543308511 km/h wind, partly_cloudy\\nSystem Context:\\nSystem Load: 0.37, Available Memory: 14GB', assigned_to='AIOps System', work_notes=['Incident created automatically by AIOps', '2025-09-13T09:52:38.745956: Remediation executed: restart_high_cpu_processes', '2025-09-13T09:52:38.745999: Incident resolved - Issue resolved by restart_high_cpu_processes'], opened_at=datetime.datetime(2025, 9, 13, 9, 52, 38, 745726), updated_at=datetime.datetime(2025, 9, 13, 9, 52, 38, 746001))",
+      "incident_report": {
+        "incident_id": "2daf0fc3-2842-43f7-b919-00d23e5ea961",
+        "timestamp": "2025-09-13T09:52:38.745726",
+        "severity": "2",
+        "title": "High CPU utilization on router-comm-04-ubuntu",
+        "executive_summary": "A high-priority incident occurred on router-comm-04-ubuntu. Root cause identified as High CPU utilization with 60% confidence. System is currently resolved.",
+        "technical_details": {
+          "affected_system": "router-comm-04-ubuntu",
+          "root_cause": "High CPU utilization",
+          "confidence_score": 0.6,
+          "metrics_count": 5,
+          "syslog_events_count": 2
+        },
+        "remediation_summary": {
+          "actions_taken": [
+            "restart_high_cpu_processes"
+          ],
+          "status": "resolved"
+        },
+        "timeline": [
+          {
+            "timestamp": "2025-09-13T09:52:38.745726",
+            "event": "Incident detected",
+            "details": "High CPU utilization on router-comm-04-ubuntu"
+          },
+          {
+            "timestamp": "2025-09-13T09:54:38.745726",
+            "event": "Remediation initiated",
+            "details": "Actions: restart_high_cpu_processes"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "process_crash_recovery",
+      "success": true,
+      "steps": [
+        {
+          "step": "crash_data_generation",
+          "success": true,
+          "events_generated": 1,
+          "metrics_generated": 5
+        }
+      ]
+    },
+    {
+      "scenario": "multi_os_remediation",
+      "success": true,
+      "steps": [
+        {
+          "step": "multi_os_testing",
+          "success": true,
+          "os_results": [
+            {
+              "os_type": "ubuntu",
+              "restart_success": true,
+              "status_check_success": true,
+              "commands_tested": 4
+            },
+            {
+              "os_type": "centos",
+              "restart_success": true,
+              "status_check_success": true,
+              "commands_tested": 4
+            },
+            {
+              "os_type": "rhel",
+              "restart_success": true,
+              "status_check_success": true,
+              "commands_tested": 4
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "incidents_created": [],
+  "remediation_actions": [],
+  "servicenow_tickets": [],
+  "ai_model_results": {},
+  "success": false,
+  "errors": [],
+  "test_end": "2025-09-13 09:52:38.746358",
+  "actual_duration": 0.0016755833333333334
+}
