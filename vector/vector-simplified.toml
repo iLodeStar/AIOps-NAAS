@@ -1,0 +1,114 @@
+# Simplified Vector Configuration for Vendor Log Normalization
+# This version focuses on core functionality without complex VRL that causes syntax errors
+
+# Enhanced syslog processing with basic vendor detection
+[transforms.syslog_vendor_parse]
+type = "remap"
+inputs = ["syslog_udp", "syslog_tcp"]
+source = '''
+.message = to_string!(.message)
+.timestamp = if exists(.timestamp) {
+    format_timestamp!(.timestamp, "%Y-%m-%d %H:%M:%S%.3f")
+} else {
+    format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+}
+.level = "INFO"
+.source = "syslog"
+.host = if exists(.hostname) { .hostname } else { "unknown" }
+.service = if exists(.appname) { .appname } else { "system" }
+.raw_log = encode_json(.)
+.labels = {}
+
+# Initialize vendor fields with defaults
+.vendor = ""
+.device_type = ""
+.cruise_segment = ""
+.facility = if exists(.facility) { to_string!(.facility) } else { "" }
+.severity = "info"
+.category = ""
+.event_id = ""
+.ip_address = "0.0.0.0"
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+
+# Basic vendor detection from message content
+msg = to_string(.message)
+
+# Cisco detection - look for %FACILITY-SEVERITY-MNEMONIC pattern
+if contains(msg, "%") && contains(msg, "-") {
+    .vendor = "cisco"
+    .category = "system"
+}
+
+# Juniper detection - look for facility.severity pattern  
+if contains(msg, ".info:") || contains(msg, ".error:") || contains(msg, ".warning:") {
+    .vendor = "juniper"
+    .category = "system"
+}
+
+# Fortinet detection - look for devname= pattern
+if contains(msg, "devname=") && contains(msg, "logid=") {
+    .vendor = "fortinet"
+    .category = "security"
+}
+
+# Aruba detection - look for FACILITY: SEVERITY pattern
+if match(msg, r'[A-Z_]+:\s*[A-Z]+:') != null {
+    .vendor = "aruba"
+    .category = "wireless"
+}
+'''
+
+[transforms.syslog_device_classification]
+type = "remap"
+inputs = ["syslog_vendor_parse"]
+source = '''
+# Simple device type classification based on hostname patterns
+hostname = downcase(to_string!(.host))
+
+# Device type classification using simple string matching
+if contains(hostname, "sw") || contains(hostname, "switch") {
+    .device_type = "switch"
+} else if contains(hostname, "rtr") || contains(hostname, "router") || contains(hostname, "gw") {
+    .device_type = "router"  
+} else if contains(hostname, "fw") || contains(hostname, "firewall") || contains(hostname, "asa") {
+    .device_type = "firewall"
+} else if contains(hostname, "ap") || contains(hostname, "wlc") || contains(hostname, "wireless") {
+    .device_type = "access_point"
+} else if contains(hostname, "srv") || contains(hostname, "server") {
+    .device_type = "server"
+} else if contains(hostname, "vsat") || contains(hostname, "modem") || contains(hostname, "satellite") {
+    .device_type = "vsat_terminal"
+} else {
+    .device_type = "unknown"
+}
+
+# Cruise segment classification based on hostname patterns  
+if contains(hostname, "bridge") || contains(hostname, "nav") || contains(hostname, "helm") {
+    .cruise_segment = "navigation"
+} else if contains(hostname, "engine") || contains(hostname, "motor") || contains(hostname, "generator") {
+    .cruise_segment = "propulsion"
+} else if contains(hostname, "guest") || contains(hostname, "dining") || contains(hostname, "cabin") {
+    .cruise_segment = "guest_services"
+} else if contains(hostname, "security") || contains(hostname, "fire") || contains(hostname, "safety") {
+    .cruise_segment = "safety_security"
+} else if contains(hostname, "comms") || contains(hostname, "wifi") || contains(hostname, "satellite") {
+    .cruise_segment = "communications"
+} else if contains(hostname, "power") || contains(hostname, "hvac") || contains(hostname, "utility") {
+    .cruise_segment = "utilities"
+} else if contains(hostname, "crew") || contains(hostname, "galley") || contains(hostname, "maintenance") {
+    .cruise_segment = "crew_areas"
+} else if contains(hostname, "deck") || contains(hostname, "cargo") || contains(hostname, "tender") {
+    .cruise_segment = "deck_operations"
+} else {
+    .cruise_segment = "general"
+}
+'''
+
+# Keep backward compatibility by using the enhanced parsing
+[transforms.syslog_for_logs]
+type = "remap"
+inputs = ["syslog_device_classification"]
+source = '''
+# This is now a pass-through since all processing is done in vendor parsing
+true
+'''
