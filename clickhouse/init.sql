@@ -17,10 +17,20 @@ CREATE TABLE IF NOT EXISTS logs.raw (
     tags Map(String, String),
     kind String,
     counter_value Float64,
-    gauge_value Float64
+    gauge_value Float64,
+    -- Network vendor/device extensions (backward-compatible)
+    vendor LowCardinality(String) DEFAULT '',
+    device_type LowCardinality(String) DEFAULT '',
+    cruise_segment LowCardinality(String) DEFAULT '',
+    facility LowCardinality(String) DEFAULT '',
+    severity LowCardinality(String) DEFAULT '',
+    category LowCardinality(String) DEFAULT '',
+    event_id String DEFAULT '',
+    ip_address IPv4 DEFAULT toIPv4('0.0.0.0'),
+    ingestion_time DateTime DEFAULT now()
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (timestamp, source, level)
+ORDER BY (timestamp, vendor, device_type, source, level)
 TTL timestamp + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 

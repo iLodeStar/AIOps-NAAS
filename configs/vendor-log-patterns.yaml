@@ -1,0 +1,135 @@
+# Vendor-specific log parsing patterns and device mappings
+# Used by Vector transforms to identify and parse vendor-specific log formats
+
+vendor_patterns:
+  # Cisco patterns - support for multiple OS types
+  cisco:
+    # Cisco IOS/IOS-XE pattern: %FACILITY-SEVERITY-MNEMONIC: message
+    ios_pattern: '(?P<full_match>%(?P<facility>[A-Z_]+)-(?P<severity_num>\d)-(?P<mnemonic>[A-Z_]+):\s*(?P<message_text>.*?)(?:\n|$))'
+    # Cisco NX-OS pattern: Similar to IOS but with some variations
+    nxos_pattern: '(?P<full_match>%(?P<facility>[A-Z_]+)-(?P<severity_num>\d)-(?P<mnemonic>[A-Z_]+):\s*(?P<message_text>.*?)(?:\n|$))'
+    # Cisco AireOS (WLC) pattern: More structured format
+    aireos_pattern: '(?P<full_match>\*(?P<facility>[A-Z_]+):\s*(?P<severity>[A-Z]+):\s*(?P<message_text>.*?)(?:\n|$))'
+    # Cisco ASA pattern: %ASA-severity-messageID: message
+    asa_pattern: '(?P<full_match>%ASA-(?P<severity_num>\d)-(?P<event_id>\d+):\s*(?P<message_text>.*?)(?:\n|$))'
+    
+    # Severity mappings
+    severity_mapping:
+      "0": "emergency"
+      "1": "alert" 
+      "2": "critical"
+      "3": "error"
+      "4": "warning"
+      "5": "notice"
+      "6": "info"
+      "7": "debug"
+    
+    # Device type detection from hostname patterns
+    device_patterns:
+      switch: ['sw-', 'switch-', '-sw', '-switch']
+      router: ['rtr-', 'router-', '-rtr', '-router', 'gw-', 'gateway-']
+      firewall: ['fw-', 'firewall-', '-fw', 'asa-', '-asa']
+      wireless_controller: ['wlc-', '-wlc', 'wireless-', 'controller-']
+      access_point: ['ap-', '-ap', 'accesspoint-']
+
+  # Juniper patterns - Junos OS
+  juniper:
+    # Juniper Junos pattern: facility.severity: message
+    junos_pattern: '(?P<full_match>(?P<facility>[a-zA-Z_]+)\.(?P<severity>[a-zA-Z]+):\s*(?P<message_text>.*?)(?:\n|$))'
+    
+    severity_mapping:
+      "emergency": "emergency"
+      "alert": "alert"
+      "critical": "critical"
+      "error": "error"
+      "warning": "warning"
+      "notice": "notice"
+      "info": "info"
+      "debug": "debug"
+    
+    device_patterns:
+      switch: ['ex-', '-ex', 'switch-', 'qfx-', '-qfx']
+      router: ['mx-', '-mx', 'router-', 'ptx-', '-ptx', 'acx-', '-acx']
+      firewall: ['srx-', '-srx', 'firewall-']
+
+  # Fortinet patterns - FortiOS
+  fortinet:
+    # FortiGate syslog: date=YYYY-MM-DD time=HH:MM:SS devname="name" devid="id" logid="id" type="type" subtype="subtype" level="level" msg="message"
+    fortios_pattern: '(?P<full_match>.*?devname="(?P<device_name>[^"]*)".*?logid="(?P<event_id>[^"]*)".*?type="(?P<category>[^"]*)".*?level="(?P<severity>[^"]*)".*?msg="(?P<message_text>[^"]*)".*?)'
+    
+    severity_mapping:
+      "emergency": "emergency"
+      "alert": "alert"
+      "critical": "critical"
+      "error": "error"
+      "warning": "warning"
+      "notice": "notice"
+      "information": "info"
+      "debug": "debug"
+    
+    device_patterns:
+      firewall: ['fgt-', 'fortigate-', '-fgt', 'fortinet-']
+      switch: ['fgs-', 'fortiswitch-', '-fgs']
+      access_point: ['fap-', 'fortiap-', '-fap']
+
+  # Palo Alto patterns - PAN-OS
+  paloalto:
+    # PAN-OS CSV-like syslog format (varies by log type)
+    panos_pattern: '(?P<full_match>.*?,(?P<serial_number>[^,]*),(?P<log_type>[^,]*),(?P<subtype>[^,]*),(?P<generated_time>[^,]*),(?P<source_ip>[^,]*),(?P<destination_ip>[^,]*),.*?,(?P<severity>[^,]*),(?P<message_text>.*?)(?:\n|$))'
+    
+    severity_mapping:
+      "high": "critical"
+      "medium": "warning"
+      "low": "info"
+      "critical": "critical"
+      "informational": "info"
+    
+    device_patterns:
+      firewall: ['pa-', 'palo-', '-pa', 'firewall-', 'panorama-']
+
+  # HPE Aruba patterns
+  aruba:
+    # Aruba AOS pattern: varies by device type
+    aos_pattern: '(?P<full_match>(?P<facility>[A-Z_]+):\s*(?P<severity>[A-Z]+):\s*(?P<message_text>.*?)(?:\n|$))'
+    
+    severity_mapping:
+      "EMERGENCY": "emergency"
+      "ALERT": "alert"
+      "CRITICAL": "critical"
+      "ERROR": "error"
+      "WARNING": "warning"
+      "NOTICE": "notice"
+      "INFO": "info"
+      "DEBUG": "debug"
+    
+    device_patterns:
+      switch: ['aruba-', 'hpe-', '-aruba', 'procurve-', 'switch-']
+      wireless_controller: ['wlc-', 'controller-', 'airwave-']
+      access_point: ['ap-', 'instant-', '-ap']
+
+  # Generic patterns for other vendors
+  generic:
+    # Standard syslog pattern
+    syslog_pattern: '(?P<full_match><(?P<priority>\d+)>\s*(?P<timestamp>\w{3}\s+\d+\s+\d+:\d+:\d+)\s+(?P<hostname>\S+)\s+(?P<process_name>\S+)(?:\[(?P<pid>\d+)\])?\s*:\s*(?P<message_text>.*?)(?:\n|$))'
+    
+    # Key=value pattern for various vendors
+    keyvalue_pattern: '(?P<full_match>(?P<pairs>(?:\w+=[^=]*(?: |$))+))'
+    
+    device_patterns:
+      switch: ['sw-', 'switch-', '-sw']
+      router: ['rtr-', 'router-', '-rtr', 'gw-']
+      firewall: ['fw-', 'firewall-', '-fw']
+      server: ['srv-', 'server-', '-srv', 'host-']
+      access_point: ['ap-', '-ap']
+      modem: ['vsat-', 'modem-', 'satellite-']
+
+# Cruise segment mapping based on location/hostname patterns
+cruise_segments:
+  navigation: ['bridge', 'nav', 'navigation', 'helm', 'wheelhouse']
+  propulsion: ['engine', 'motor', 'propulsion', 'boiler', 'generator']
+  guest_services: ['guest', 'cabin', 'dining', 'entertainment', 'pool', 'spa']
+  safety_security: ['safety', 'security', 'fire', 'lifeboat', 'emergency']
+  communications: ['comms', 'communication', 'radio', 'satellite', 'wifi', 'internet']
+  utilities: ['power', 'hvac', 'water', 'waste', 'electrical', 'utility']
+  crew_areas: ['crew', 'galley', 'laundry', 'maintenance', 'storage']
+  deck_operations: ['deck', 'cargo', 'tender', 'gangway', 'mooring']
