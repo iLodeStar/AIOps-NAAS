@@ -208,6 +208,14 @@ class OneClickIncidentDebugger:
             ))
             
             print(f"  {'✅' if status == 'healthy' else '❌'} {service_name}: {details}")
+            
+            # Provide additional diagnostics for unhealthy services
+            if status != 'healthy' and service_name in ['Device Registry', 'Incident API']:
+                print(f"    💡 {service_name} is critical for data pipeline - fallback values likely")
+                
+        # Check syslog port accessibility (only once at the end)
+        print("\n🔍 Checking syslog port accessibility...")
+        self._check_syslog_ports()
     def _check_syslog_ports(self):
         """Check availability of syslog ports for system log ingestion"""
         ports_to_check = [
@@ -272,10 +280,6 @@ class OneClickIncidentDebugger:
                     
         except Exception as e:
             print(f"  ⚠️  Vector syslog config check failed: {str(e)[:50]}")
-        
-        # Additional system syslog port checks
-        print(f"🔍 Checking syslog port accessibility...")
-        self._check_syslog_ports()
 
     def _check_clickhouse_health(self) -> Tuple[str, str, List[str]]:
         """Check ClickHouse health with credential detection"""
@@ -845,6 +849,9 @@ class OneClickIncidentDebugger:
         """Identify specific data mismatches for each test point"""
         print("❌ Identifying data mismatches...")
         
+        # First check general data quality issues in ClickHouse
+        self._check_general_data_quality()
+        
         for test_point in self.test_data_points:
             print(f"  🔍 Analyzing: {test_point.tracking_id}")
             
@@ -874,53 +881,310 @@ class OneClickIncidentDebugger:
         except Exception as e:
             print(f"    ❌ Mismatch analysis error: {str(e)}")
 
-    def _compare_expected_vs_actual(self, actual_data: str, test_point: TestDataPoint):
-        """Compare expected vs actual data and record mismatches"""
-        # Parse actual data (simplified - would need proper parsing)
-        actual_line = actual_data.strip().split('\n')[0] if actual_data.strip() else ""
+    def _check_general_data_quality(self):
+        """Check general data quality issues in ClickHouse independent of test data"""
+        print("  🔍 Checking general data quality in ClickHouse...")
         
-        # Check each field
-        if 'unknown-ship' in actual_line:
+        # First, check if critical services are down and predict issues
+        critical_services_down = []
+        for service_check in self.service_checks:
+            if service_check.status != 'healthy':
+                if service_check.service_name == 'Device Registry':
+                    critical_services_down.append('device_registry')
+                elif service_check.service_name == 'Incident API':
+                    critical_services_down.append('incident_api')
+        
+        # If critical services are down, predict data quality issues
+        if critical_services_down:
+            print(f"    ⚠️ Critical services down: {', '.join(critical_services_down)}")
+            self._create_predicted_mismatches(critical_services_down)
+        
+        try:
+            # Query recent incidents to check for fallback values
+            query = "SELECT ship_id, service, metric_name, metric_value, message FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 100"
+            
+            credentials = [('admin', 'admin'), ('default', 'clickhouse123'), ('default', '')]
+            
+            for user, password in credentials:
+                try:
+                    password_flag = f'--password={password}' if password else '--password='
+                    cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
+                           f'--user={user}', password_flag, f'--query={query}']
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                    
+                    if result.returncode == 0:
+                        if result.stdout.strip():
+                            self._analyze_general_data_quality(result.stdout.strip())
+                        else:
+                            print("    ⚠️ No incidents found in database - this may indicate data pipeline issues")
+                            if not critical_services_down:  # Only add if we haven't already predicted issues
+                                self._add_no_data_mismatch()
+                        break
+                        
+                except Exception:
+                    continue
+            else:
+                print("    ❌ Could not connect to ClickHouse to check data quality")
+                # If we can't connect to ClickHouse but some services claim to be healthy, this is suspicious
+                if not critical_services_down:
+                    self._add_clickhouse_connectivity_mismatch()
+                
+        except Exception as e:
+            print(f"    ❌ General data quality check error: {str(e)}")
+
+    def _create_predicted_mismatches(self, critical_services_down: List[str]):
+        """Create predicted mismatches based on critical services being down"""
+        print("    🔮 Predicting data quality issues based on service status...")
+        
+        if 'device_registry' in critical_services_down:
+            print("    📋 Device Registry is down - expecting ship_id resolution failures")
             self.data_mismatches.append(DataMismatch(
                 field_name='ship_id',
-                expected_value=test_point.ship_id,
-                actual_value='unknown-ship',
+                expected_value='actual ship identifiers (e.g., test-ship-alpha)',
+                actual_value='unknown-ship (predicted due to Device Registry being down)',
                 service_responsible='Device Registry',
-                root_cause='Hostname to ship_id mapping missing',
+                root_cause='Device Registry service is not running or not accessible',
                 fix_steps=[
-                    'Verify device registry is running',
-                    'Check hostname mapping exists',
-                    'Ensure Vector extracts hostname properly'
+                    'Start the Device Registry service: docker-compose restart device-registry',
+                    'Check Device Registry health: curl http://localhost:8091/health',
+                    'Verify device registry database is accessible',
+                    'Ensure Benthos configuration includes device registry lookups',
+                    'Register test devices for validation'
                 ]
             ))
-            
-        if 'unknown_service' in actual_line:
+        
+        if 'incident_api' in critical_services_down:
+            print("    📋 Incident API is down - expecting incident processing failures")
+            self.data_mismatches.append(DataMismatch(
+                field_name='incident_processing',
+                expected_value='incidents stored and queryable in ClickHouse',
+                actual_value='incidents may not be properly processed (predicted due to Incident API being down)',
+                service_responsible='Incident API',
+                root_cause='Incident API service is not running or not accessible',
+                fix_steps=[
+                    'Start the Incident API service: docker-compose restart incident-api',
+                    'Check Incident API health: curl http://localhost:9081/health',
+                    'Verify NATS connectivity for incident events',
+                    'Check ClickHouse connectivity from Incident API',
+                    'Verify incident processing workflow'
+                ]
+            ))
+
+    def _add_clickhouse_connectivity_mismatch(self):
+        """Add a mismatch for ClickHouse connectivity issues despite service claims"""
+        self.data_mismatches.append(DataMismatch(
+            field_name='database_connectivity',
+            expected_value='accessible ClickHouse database with incident data',
+            actual_value='ClickHouse not accessible despite health checks passing',
+            service_responsible='ClickHouse / Infrastructure',
+            root_cause='ClickHouse connectivity issues or credential problems',
+            fix_steps=[
+                'Verify ClickHouse container is running: docker ps | grep clickhouse',
+                'Check ClickHouse health: curl http://localhost:8123/ping',
+                'Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin',
+                'Check ClickHouse logs: docker logs aiops-clickhouse',
+                'Verify database initialization and table creation'
+            ]
+        ))
+
+    def _analyze_general_data_quality(self, incidents_data: str):
+        """Analyze general data quality issues"""
+        lines = incidents_data.strip().split('\n')
+        total_incidents = len(lines)
+        
+        fallback_counts = {
+            'unknown-ship': 0,
+            'unknown_service': 0, 
+            'unknown_metric': 0,
+            'zero_values': 0,
+            'empty_values': 0
+        }
+        
+        print(f"    📊 Analyzing {total_incidents} recent incidents...")
+        
+        for line in lines:
+            if line.strip():
+                # Split by tabs (ClickHouse default format)
+                fields = line.strip().split('\t')
+                if len(fields) >= 5:
+                    ship_id, service, metric_name, metric_value, message = fields[:5]
+                    
+                    if ship_id == 'unknown-ship' or 'unknown' in ship_id.lower():
+                        fallback_counts['unknown-ship'] += 1
+                    if service == 'unknown_service' or 'unknown' in service.lower():
+                        fallback_counts['unknown_service'] += 1  
+                    if metric_name == 'unknown_metric' or 'unknown' in metric_name.lower():
+                        fallback_counts['unknown_metric'] += 1
+                    if metric_value in ['0', '0.0', '']:
+                        fallback_counts['zero_values'] += 1
+                    if not ship_id or not service or not metric_name:
+                        fallback_counts['empty_values'] += 1
+        
+        # Generate mismatches based on data quality issues found
+        for issue_type, count in fallback_counts.items():
+            if count > 0:
+                percentage = (count / total_incidents * 100) if total_incidents > 0 else 0
+                print(f"    ⚠️ {issue_type}: {count}/{total_incidents} incidents ({percentage:.1f}%)")
+                
+                if percentage > 10:  # If more than 10% have this issue, create a mismatch
+                    self._create_data_quality_mismatch(issue_type, count, total_incidents, percentage)
+
+    def _create_data_quality_mismatch(self, issue_type: str, count: int, total: int, percentage: float):
+        """Create a data mismatch based on data quality issues"""
+        if issue_type == 'unknown-ship':
+            self.data_mismatches.append(DataMismatch(
+                field_name='ship_id',
+                expected_value='actual ship identifiers',
+                actual_value=f'unknown-ship in {count}/{total} incidents ({percentage:.1f}%)',
+                service_responsible='Device Registry',
+                root_cause='Hostname to ship_id mapping missing or device registry not accessible',
+                fix_steps=[
+                    'Verify device registry service is running and accessible',
+                    'Check if hostname mappings are registered in device registry',
+                    'Ensure Vector is extracting hostnames correctly from log sources',
+                    'Verify Benthos configuration includes device registry lookups'
+                ]
+            ))
+        elif issue_type == 'unknown_service':
             self.data_mismatches.append(DataMismatch(
                 field_name='service',
-                expected_value=test_point.service_name,
-                actual_value='unknown_service',
+                expected_value='actual service names',
+                actual_value=f'unknown_service in {count}/{total} incidents ({percentage:.1f}%)',
                 service_responsible='Vector',
-                root_cause='Service name not extracted from syslog appname field',
+                root_cause='Service name not extracted from syslog appname field or structured logs',
                 fix_steps=[
-                    'Configure structured logging with appname',
-                    'Update Vector parsing rules',
-                    'Verify syslog format compliance'
+                    'Configure applications to use structured logging with service names',
+                    'Update Vector configuration to extract service names from log sources',
+                    'Verify syslog format includes appname field',
+                    'Check Vector transforms are properly parsing log messages'
                 ]
             ))
-            
-        if 'unknown_metric' in actual_line:
+        elif issue_type == 'unknown_metric':
             self.data_mismatches.append(DataMismatch(
-                field_name='metric_name',
-                expected_value=test_point.metric_name,
-                actual_value='unknown_metric',
-                service_responsible='Anomaly Detection',
-                root_cause='Metric name not included in anomaly events',
+                field_name='metric_name', 
+                expected_value='actual metric names',
+                actual_value=f'unknown_metric in {count}/{total} incidents ({percentage:.1f}%)',
+                service_responsible='Anomaly Detection / Benthos',
+                root_cause='Metric names not included in incident events or correlation failing',
                 fix_steps=[
-                    'Update anomaly detection to include metric names',
-                    'Verify NATS event structure',
-                    'Check Benthos metric processing'
+                    'Update anomaly detection to include metric names in events',
+                    'Verify NATS event structure includes metric information',
+                    'Check Benthos metric correlation and processing logic',
+                    'Ensure metric data is properly linked to incident events'
                 ]
             ))
+
+    def _add_no_data_mismatch(self):
+        """Add a mismatch for when no data is found at all"""
+        self.data_mismatches.append(DataMismatch(
+            field_name='data_pipeline',
+            expected_value='incident data in ClickHouse',
+            actual_value='no incidents found in database',
+            service_responsible='Data Pipeline',
+            root_cause='Data pipeline not processing events or storing incidents',
+            fix_steps=[
+                'Verify all services in the pipeline are running (Vector, NATS, Benthos, ClickHouse)',
+                'Check Vector is receiving and processing log data',
+                'Verify NATS streams are receiving events from Vector',
+                'Check Benthos is consuming from NATS and writing to ClickHouse',
+                'Verify ClickHouse database and tables are properly initialized'
+            ]
+        ))
+
+    def _compare_expected_vs_actual(self, actual_data: str, test_point: TestDataPoint):
+        """Compare expected vs actual data and record mismatches"""
+        # Parse actual data (ClickHouse output format)
+        actual_lines = actual_data.strip().split('\n')
+        if not actual_lines or not actual_lines[0].strip():
+            print(f"    ⚠️ No matching incident found for {test_point.tracking_id}")
+            return
+            
+        actual_line = actual_lines[0].strip()
+        
+        # Split by tabs (ClickHouse default format) 
+        fields = actual_line.split('\t')
+        
+        # Analyze each field if we have the expected structure
+        if len(fields) >= 3:
+            ship_id = fields[0] if len(fields) > 0 else ""
+            service = fields[1] if len(fields) > 1 else "" 
+            metric_name = fields[2] if len(fields) > 2 else ""
+            metric_value = fields[3] if len(fields) > 3 else ""
+            
+            print(f"    📋 Found incident: ship_id='{ship_id}', service='{service}', metric='{metric_name}', value='{metric_value}'")
+            
+            # Check each field for mismatches
+            if ship_id == 'unknown-ship' or 'unknown' in ship_id.lower():
+                print(f"    ❌ Ship ID mismatch: expected '{test_point.ship_id}', got '{ship_id}'")
+                self.data_mismatches.append(DataMismatch(
+                    field_name='ship_id',
+                    expected_value=test_point.ship_id,
+                    actual_value=ship_id,
+                    service_responsible='Device Registry',
+                    root_cause='Hostname to ship_id mapping missing or device registry not accessible',
+                    fix_steps=[
+                        'Verify device registry service is running and accessible',
+                        f'Register hostname mapping: curl -X POST http://localhost:8091/devices -d \'{{"hostname":"{test_point.hostname}","ship_id":"{test_point.ship_id}"}}\'',
+                        'Ensure Vector extracts hostname properly from log sources',
+                        'Check Benthos device registry integration is working'
+                    ]
+                ))
+                
+            if service == 'unknown_service' or 'unknown' in service.lower():
+                print(f"    ❌ Service mismatch: expected '{test_point.service_name}', got '{service}'")
+                self.data_mismatches.append(DataMismatch(
+                    field_name='service',
+                    expected_value=test_point.service_name,
+                    actual_value=service,
+                    service_responsible='Vector',
+                    root_cause='Service name not extracted from syslog appname field or log source',
+                    fix_steps=[
+                        'Configure applications to use structured logging with service names',
+                        'Update Vector configuration to extract appname from syslog messages',
+                        'Verify syslog format includes proper appname field',
+                        'Check Vector transforms are correctly parsing service names'
+                    ]
+                ))
+                
+            if metric_name == 'unknown_metric' or 'unknown' in metric_name.lower():
+                print(f"    ❌ Metric name mismatch: expected '{test_point.metric_name}', got '{metric_name}'")
+                self.data_mismatches.append(DataMismatch(
+                    field_name='metric_name',
+                    expected_value=test_point.metric_name,
+                    actual_value=metric_name,
+                    service_responsible='Anomaly Detection / Benthos',
+                    root_cause='Metric names not included in incident events or correlation failing',
+                    fix_steps=[
+                        'Update anomaly detection service to include metric names in events',
+                        'Verify NATS event structure includes metric information',
+                        'Check Benthos metric correlation and enrichment logic',
+                        'Ensure Victoria Metrics data is properly linked to incident events'
+                    ]
+                ))
+                
+            if metric_value in ['0', '0.0', ''] or metric_value == '0':
+                print(f"    ❌ Metric value mismatch: expected '{test_point.metric_value}', got '{metric_value}'")
+                self.data_mismatches.append(DataMismatch(
+                    field_name='metric_value',
+                    expected_value=str(test_point.metric_value),
+                    actual_value=metric_value,
+                    service_responsible='Metric Correlation',
+                    root_cause='Metric values not properly correlated with incident events',
+                    fix_steps=[
+                        'Verify Victoria Metrics is receiving and storing metric data',
+                        'Check Benthos metric correlation logic',
+                        'Ensure incident events include proper metric value references',
+                        'Verify time-based correlation between metrics and incidents is working'
+                    ]
+                ))
+        else:
+            print(f"    ⚠️ Unexpected data format for {test_point.tracking_id}: {actual_line}")
+            
+        # Also check if the tracking ID appears in the message field
+        if test_point.tracking_id not in actual_line:
+            print(f"    ⚠️ Tracking ID '{test_point.tracking_id}' not found in incident data")
+        else:
+            print(f"    ✅ Tracking ID found in incident data")
 
     def _generate_reproduction_steps(self):
         """Generate detailed reproduction steps with specific data points"""
