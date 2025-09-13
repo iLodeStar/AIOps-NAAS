@@ -1,0 +1,64 @@
+[
+  {
+    "timestamp": "2025-01-15T10:30:00.123Z",
+    "vendor": "microsoft",
+    "device_type": "server",
+    "hostname": "crew-srv01",
+    "level": "ERROR",
+    "message": "The server service failed to start due to insufficient memory",
+    "source_name": "Service Control Manager",
+    "event_id": 7000,
+    "host": {
+      "name": "crew-srv01",
+      "ip": ["192.168.50.10"],
+      "os": "Windows Server 2019"
+    },
+    "winlog": {
+      "event_id": 7000,
+      "source_name": "Service Control Manager",
+      "level": "Error",
+      "provider_name": "Service Control Manager"
+    },
+    "cruise_segment": "crew_areas"
+  },
+  {
+    "timestamp": "2025-01-15T10:30:15.456Z",
+    "vendor": "microsoft", 
+    "device_type": "server",
+    "hostname": "bridge-srv02",
+    "level": "WARNING",
+    "message": "The system has detected a potential security threat",
+    "source_name": "Windows Security",
+    "event_id": 4625,
+    "host": {
+      "name": "bridge-srv02",
+      "ip": ["192.168.1.100"]
+    },
+    "winlog": {
+      "event_id": 4625,
+      "source_name": "Microsoft-Windows-Security-Auditing",
+      "level": "Warning"
+    },
+    "cruise_segment": "navigation"
+  },
+  {
+    "timestamp": "2025-01-15T10:30:30.789Z",
+    "vendor": "microsoft",
+    "device_type": "server", 
+    "hostname": "dining-srv03",
+    "level": "INFO",
+    "message": "Application started successfully",
+    "source_name": "Application",
+    "event_id": 1000,
+    "host": {
+      "name": "dining-srv03",
+      "ip": ["192.168.100.20"]
+    },
+    "winlog": {
+      "event_id": 1000,
+      "source_name": "Application",
+      "level": "Information"
+    },
+    "cruise_segment": "guest_services"
+  }
+]
