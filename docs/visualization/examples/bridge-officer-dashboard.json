@@ -1,0 +1,55 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "bridge-officer-001",
+    "title": "🚢 Bridge Officer Dashboard - Simple Operations View",
+    "description": "Simplified dashboard for bridge crew with plain language status and large, readable displays",
+    "tags": ["bridge", "navigation", "user-friendly", "operations"],
+    "timezone": "UTC",
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "🌊 Weather Impact on Systems",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT CASE WHEN COUNT(*) = 0 THEN 'Good' WHEN COUNT(*) < 5 THEN 'Caution' ELSE 'Bad' END as weather_status FROM logs.raw WHERE timestamp > now() - INTERVAL 10 MINUTE"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"options": {"Good": {"color": "green", "text": "☀️ All Clear"}}, "type": "value"},
+              {"options": {"Caution": {"color": "yellow", "text": "⚠️ Watch Weather"}}, "type": "value"},
+              {"options": {"Bad": {"color": "red", "text": "🌪️ Storm Impact"}}, "type": "value"}
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "📡 Internet & Communications",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+        "targets": [
+          {
+            "datasource": "VictoriaMetrics",
+            "expr": "avg(satellite_signal_strength) > 0.7"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"options": {"1": {"color": "green", "text": "📶 Strong Signal"}}, "type": "value"},
+              {"options": {"0": {"color": "red", "text": "📵 Poor Signal"}}, "type": "value"}
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

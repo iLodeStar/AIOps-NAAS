@@ -1,0 +1,244 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "ai-effectiveness-001",
+    "title": "🤖 AI & Automation Effectiveness Dashboard",
+    "description": "Track anomaly detection performance, incident management, and auto-remediation success rates",
+    "tags": ["ai", "ml", "automation", "effectiveness", "analytics"],
+    "timezone": "UTC",
+    "refresh": "5m",
+    "panels": [
+      {
+        "id": 1,
+        "title": "🎯 Anomaly Detection Accuracy",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT (SUM(CASE WHEN confirmed = 'true' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)) as accuracy FROM anomalies WHERE timestamp > now() - INTERVAL 24 HOUR"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 70},
+                {"color": "green", "value": 85}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 2,
+        "title": "⚡ Detection Speed (Minutes)",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT AVG(detection_latency_seconds) / 60 as avg_minutes FROM anomalies WHERE timestamp > now() - INTERVAL 24 HOUR"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "min",
+            "decimals": 1,
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 15}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "🔧 Auto-Remediation Success Rate",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT (SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)) as success_rate FROM remediation_attempts WHERE timestamp > now() - INTERVAL 24 HOUR"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 60},
+                {"color": "green", "value": 80}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "📊 Anomaly → Incident → Resolution Pipeline",
+        "type": "table",
+        "gridPos": {"h": 10, "w": 24, "x": 0, "y": 8},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT toDate(timestamp) as date, COUNT(*) as anomalies_detected, SUM(CASE WHEN converted_to_incident = 'true' THEN 1 ELSE 0 END) as incidents_created, SUM(CASE WHEN auto_resolved = 'true' THEN 1 ELSE 0 END) as auto_resolved, SUM(CASE WHEN manual_intervention = 'true' THEN 1 ELSE 0 END) as manual_required, AVG(resolution_time_minutes) as avg_resolution_time FROM anomalies WHERE timestamp > now() - INTERVAL 7 DAY GROUP BY date ORDER BY date DESC"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "center",
+              "displayMode": "basic"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "avg_resolution_time"},
+              "properties": [
+                {"id": "unit", "value": "min"},
+                {"id": "decimals", "value": 1}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 5,
+        "title": "📈 AI Model Performance Trends",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT timestamp, AVG(accuracy_score) as accuracy, AVG(precision_score) as precision, AVG(recall_score) as recall FROM model_performance WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY toStartOfDay(timestamp) ORDER BY timestamp"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "pointSize": 5,
+              "showPoints": "never"
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "💰 Cost Savings from Automation",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT SUM(estimated_cost_savings_usd) as total_savings FROM remediation_attempts WHERE outcome = 'success' AND timestamp > now() - INTERVAL 30 DAY"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 0,
+            "color": {
+              "mode": "palette-classic"
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 7,
+        "title": "🔄 Model Drift Detection",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawQuery": true,
+            "query": "SELECT timestamp, drift_score, CASE WHEN drift_score > 0.3 THEN 1 ELSE 0 END as drift_alert FROM model_drift_monitoring WHERE timestamp > now() - INTERVAL 7 DAY ORDER BY timestamp"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 0,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              },
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "line"
+              }
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 0.3}
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
