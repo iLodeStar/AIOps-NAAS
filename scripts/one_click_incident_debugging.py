@@ -1207,7 +1207,7 @@ class OneClickIncidentDebugger:
                 "1. Start all services: `docker-compose up -d`",
                 f"2. Register device mapping:",
                 f"   ```bash",
-                f"   curl -X POST http://localhost:8091/devices \\",
+                f"   curl -X POST http://localhost:8081/devices \\",
                 f"     -H 'Content-Type: application/json' \\",
                 f"     -d '{{\"hostname\":\"{test_point.hostname}\",\"ship_id\":\"{test_point.ship_id}\"}}'",
                 f"   ```"
