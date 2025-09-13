@@ -1,0 +1,74 @@
+{
+  "monitoring_interval": 300,
+  "syslog_port": 1514,
+  "snmp_targets": [
+    "localhost",
+    "192.168.1.1"
+  ],
+  "test_message_formats": true,
+  "test_snmp_compatibility": true,
+  "max_results_history": 1000,
+  "report_file": "/tmp/compatibility_report.json",
+  "os_specific_tests": {
+    "debian": {
+      "enabled": true,
+      "test_patterns": [
+        "systemd",
+        "kernel",
+        "auth"
+      ]
+    },
+    "rhel": {
+      "enabled": true,
+      "test_patterns": [
+        "systemd", 
+        "audit",
+        "firewalld"
+      ]
+    },
+    "windows": {
+      "enabled": true,
+      "test_patterns": [
+        "Security-Auditing",
+        "Application",
+        "System"
+      ]
+    },
+    "unix": {
+      "enabled": true,
+      "test_patterns": [
+        "syslogd",
+        "kernel"
+      ]
+    },
+    "vm": {
+      "enabled": true,
+      "test_patterns": [
+        "vmware-tools",
+        "hv-kvp-daemon"
+      ]
+    },
+    "headless": {
+      "enabled": true,
+      "test_patterns": [
+        "systemd-logind",
+        "ssh"
+      ]
+    }
+  },
+  "snmp_communities": [
+    "public",
+    "private"
+  ],
+  "notification_settings": {
+    "email_on_failure": false,
+    "webhook_url": null,
+    "slack_channel": null
+  },
+  "advanced_settings": {
+    "concurrent_tests": 5,
+    "test_timeout": 30,
+    "retry_attempts": 3,
+    "enable_debug_logging": false
+  }
+}
