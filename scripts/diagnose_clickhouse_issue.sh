@@ -40,7 +40,7 @@ echo "--------------------------------------"
 
 # Test ClickHouse authentication with Docker Compose credentials
 echo "Testing ClickHouse auth with default credentials:"
-docker exec aiops-clickhouse clickhouse-client --user=default --password=clickhouse123 --query="SELECT 1" 2>/dev/null && echo "  ✅ Auth with default/clickhouse123 works" || echo "  ❌ Auth with default/clickhouse123 failed"
+docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin --query="SELECT 1" 2>/dev/null && echo "  ✅ Auth with admin/admin works" || echo "  ❌ Auth with default/clickhouse123 failed"
 
 # Check current ClickHouse users
 echo "Current ClickHouse users:"

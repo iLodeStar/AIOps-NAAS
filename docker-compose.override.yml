@@ -58,7 +58,6 @@ services:
     volumes:
       - /var/log/syslog:/var/log/syslog:ro
       - /var/log/messages:/var/log/messages:ro
-      - /var/log/sample/:/var/log/sample/:ro
       - ./vector/vector.toml:/etc/vector/vector.toml:ro
     environment:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}

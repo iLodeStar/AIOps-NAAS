@@ -31,7 +31,7 @@ print_status() {
 check_services() {
     print_status "$BLUE" "🔍 Checking service status..."
     
-    if ! docker-compose ps > /dev/null 2>&1; then
+    if ! docker compose ps > /dev/null 2>&1; then
         print_status "$RED" "❌ Docker Compose not found or not running"
         echo "Please ensure Docker Compose is installed and services are running:"
         echo "  docker-compose up -d"
@@ -39,8 +39,8 @@ check_services() {
     fi
     
     # Check if key services are running
-    local running_services=$(docker-compose ps --services --filter "status=running" | wc -l)
-    local total_services=$(docker-compose config --services | wc -l)
+    local running_services=$(docker compose ps --services --filter "status=running" | wc -l)
+    local total_services=$(docker compose config --services | wc -l)
     
     if [ "$running_services" -lt 5 ]; then
         print_status "$YELLOW" "⚠️  Only $running_services/$total_services services running"

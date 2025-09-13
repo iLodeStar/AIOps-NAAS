@@ -28,7 +28,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # VictoriaMetrics - Metrics storage
   victoria-metrics:
@@ -54,7 +54,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # VictoriaMetrics Agent - Scrapes metrics and sends to VictoriaMetrics
   vmagent:
@@ -74,7 +74,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Node Exporter - System metrics
   node-exporter:
@@ -92,7 +92,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Grafana - Visualization and dashboards
   grafana:
@@ -124,7 +124,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Qdrant - Vector database for RAG
   qdrant:
@@ -147,7 +147,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Ollama - LLM inference engine
   ollama:
@@ -172,7 +172,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # NATS - Message bus with JetStream (includes CLI for debugging)
   nats:
@@ -200,7 +200,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # MailHog - Local SMTP testing
   mailhog:
@@ -220,7 +220,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Vector - Log processing and routing
   vector:
@@ -253,7 +253,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # VMAlert - Alert manager for VictoriaMetrics
   vmalert:
@@ -278,7 +278,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Alertmanager - Handle alerts and route to MailHog
   alertmanager:
@@ -301,7 +301,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # River Anomaly Detection Service - v0.2 streaming anomaly detection
   anomaly-detection:
@@ -336,7 +336,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Benthos - Stream processing for event correlation
   benthos:
@@ -365,7 +365,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Benthos Data Enrichment - Level 1 correlation for raw data enrichment
   benthos-enrichment:
@@ -390,7 +390,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Enhanced Anomaly Detection - Context-aware anomaly detection with enriched data
   enhanced-anomaly-detection:
@@ -419,7 +419,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Network Device Collector - SNMP-based network infrastructure monitoring
   network-device-collector:
@@ -446,7 +446,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Incident API - REST API for incident management
   incident-api:
@@ -477,7 +477,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # v0.3 Services - Predictive Link Health + Guarded Auto-Remediation
 
@@ -508,7 +508,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Remediation Service - Guarded auto-remediation with approval workflows
   remediation:
@@ -537,7 +537,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Open Policy Agent - Policy enforcement for remediation actions
   opa:
@@ -563,7 +563,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # v0.4 Services - Fleet Reporting, Capacity Forecasting, Cross-Ship Benchmarking
 
@@ -596,7 +596,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Capacity Forecasting Service - Seasonal traffic and capacity prediction
   capacity-forecasting:
@@ -627,7 +627,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Cross-Ship Benchmarking Service - Performance comparison and correlation analysis
   cross-ship-benchmarking:
@@ -658,7 +658,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Onboarding Service - Secure ship/project onboarding with two-level approvals
   onboarding-service:
@@ -698,7 +698,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Incident Explanation Service - User-friendly incident translation and visualization
   incident-explanation:
@@ -730,7 +730,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Data Flow Visualization Service
   data-flow-visualization:
@@ -760,7 +760,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Application Log Collector Service
   application-log-collector:
@@ -786,7 +786,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
   # Device Registry & Mapping Service - Manages hostname → ship_id mappings
   device-registry:
@@ -812,7 +812,7 @@ services:
       driver: "json-file"
       options:
         max-file: "3"
-        max-size: "30m"
+        max-size: "10m"
 
 volumes:
   clickhouse_data:

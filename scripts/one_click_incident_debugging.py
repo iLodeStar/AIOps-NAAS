@@ -188,7 +188,7 @@ class OneClickIncidentDebugger:
             ('Benthos', 'http://localhost:4195/ping', ['http://localhost:4195/stats']),
             ('Victoria Metrics', 'http://localhost:8428/health', []),
             ('Incident API', 'http://localhost:9081/health', []),
-            ('Device Registry', 'http://localhost:8091/health', [])
+            ('Device Registry', 'http://localhost:8081/health', [])
         ]
         
         for service_name, health_endpoint, additional_endpoints in services_to_check:
@@ -440,7 +440,7 @@ class OneClickIncidentDebugger:
             }
             
             response = requests.post(
-                'http://localhost:8091/devices',
+                'http://localhost:8081/devices',
                 json=payload,
                 timeout=10
             )
@@ -946,7 +946,7 @@ class OneClickIncidentDebugger:
                 root_cause='Device Registry service is not running or not accessible',
                 fix_steps=[
                     'Start the Device Registry service: docker-compose restart device-registry',
-                    'Check Device Registry health: curl http://localhost:8091/health',
+                    'Check Device Registry health: curl http://localhost:8081/health',
                     'Verify device registry database is accessible',
                     'Ensure Benthos configuration includes device registry lookups',
                     'Register test devices for validation'
@@ -1124,7 +1124,7 @@ class OneClickIncidentDebugger:
                     root_cause='Hostname to ship_id mapping missing or device registry not accessible',
                     fix_steps=[
                         'Verify device registry service is running and accessible',
-                        f'Register hostname mapping: curl -X POST http://localhost:8091/devices -d \'{{"hostname":"{test_point.hostname}","ship_id":"{test_point.ship_id}"}}\'',
+                        f'Register hostname mapping: curl -X POST http://localhost:8081/devices -d \'{{"hostname":"{test_point.hostname}","ship_id":"{test_point.ship_id}"}}\'',
                         'Ensure Vector extracts hostname properly from log sources',
                         'Check Benthos device registry integration is working'
                     ]
