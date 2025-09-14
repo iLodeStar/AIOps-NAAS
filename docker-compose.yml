@@ -767,7 +767,7 @@ services:
     build: ./services/application-log-collector
     container_name: aiops-application-log-collector
     ports:
-      - "8090:8090"  # HTTP log ingestion
+      - "8091:8090"  # HTTP log ingestion
       - "5140:5140"  # TCP log ingestion
     environment:
       - NATS_URL=nats://nats:4222
