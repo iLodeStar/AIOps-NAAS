@@ -284,25 +284,39 @@ class OneClickIncidentDebugger:
 
     def _check_clickhouse_health(self) -> Tuple[str, str, List[str]]:
         """Check ClickHouse health with credential detection"""
+        # First check if container is running
+        try:
+            container_check = subprocess.run(['docker', 'ps'], capture_output=True, text=True, timeout=5)
+            if 'aiops-clickhouse' not in container_check.stdout:
+                return 'unhealthy', 'ClickHouse container not running', ['Start container: docker-compose up -d clickhouse']
+        except Exception:
+            return 'unhealthy', 'Cannot check Docker containers', ['Verify Docker is running']
+            
         credentials_to_try = [
             ('admin', 'admin'),
             ('default', 'clickhouse123'),
             ('default', ''),
         ]
         
+        errors = []
         for user, password in credentials_to_try:
             try:
+                password_arg = f'--password={password}' if password else '--password='
                 cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                       f'--user={user}', f'--password={password}', '--query=SELECT 1']
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                       f'--user={user}', password_arg, '--query=SELECT 1', '--format=TabSeparated']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                 
-                if result.returncode == 0:
+                if result.returncode == 0 and result.stdout.strip() == '1':
                     return 'healthy', f'Connected with {user}/{password}', []
+                else:
+                    errors.append(f'{user}: {result.stderr.strip()[:100] if result.stderr else "Unknown error"}')
                     
+            except subprocess.TimeoutExpired:
+                errors.append(f'{user}: Connection timeout')
             except Exception as e:
-                continue
+                errors.append(f'{user}: {str(e)[:100]}')
                 
-        return 'unhealthy', 'Could not connect with any credentials', ['Connection failed']
+        return 'unhealthy', 'Could not connect with any credentials', errors
         
     def _check_http_service(self, endpoint: str) -> Tuple[str, str, List[str]]:
         """Check HTTP service health"""
@@ -526,33 +540,46 @@ class OneClickIncidentDebugger:
             except Exception as e:
                 print(f"    ⚠️  UDP 514 failed (expected if not root): {str(e)[:50]}")
             
-            # Method 4: Fallback to Vector HTTP API  
+            # Method 4: Fallback to Vector HTTP API (if available)
+            # Note: This requires Vector to have an HTTP input configured
             try:
-                # Create a structured log event for Vector HTTP input
-                http_event = {
-                    "timestamp": test_point.timestamp.isoformat(),
-                    "message": test_point.log_message,
-                    "hostname": test_point.hostname,
-                    "appname": test_point.service_name,
-                    "facility": facility,
-                    "severity": 6,
-                    "syslog_type": syslog_type,
-                    "tracking_id": test_point.tracking_id
-                }
-                
-                response = requests.post(
-                    'http://localhost:8686/events',
-                    json=http_event,
-                    headers={'Content-Type': 'application/json'},
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    success_methods.append("HTTP-API")
-                    print(f"    ✅ Sent via Vector HTTP API")
-                else:
-                    print(f"    ⚠️  HTTP API returned: {response.status_code}")
+                # Check if Vector has an HTTP input endpoint configured
+                vector_response = requests.get('http://localhost:8686/health', timeout=5)
+                if vector_response.status_code == 200:
+                    # Try common Vector HTTP input endpoints
+                    for endpoint in ['/events', '/logs', '/v1/logs']:
+                        try:
+                            http_event = {
+                                "timestamp": test_point.timestamp.isoformat(),
+                                "message": test_point.log_message,
+                                "hostname": test_point.hostname,
+                                "appname": test_point.service_name,
+                                "facility": facility,
+                                "severity": 6,
+                                "syslog_type": syslog_type,
+                                "tracking_id": test_point.tracking_id
+                            }
+                            
+                            response = requests.post(
+                                f'http://localhost:8686{endpoint}',
+                                json=http_event,
+                                headers={'Content-Type': 'application/json'},
+                                timeout=5
+                            )
+                            if response.status_code in [200, 201, 202]:
+                                success_methods.append("HTTP-API")
+                                print(f"    ✅ Sent via Vector HTTP API ({endpoint})")
+                                break
+                            elif response.status_code == 404:
+                                continue  # Try next endpoint
+                            else:
+                                print(f"    ⚠️  HTTP API {endpoint} returned: {response.status_code}")
+                        except Exception:
+                            continue
+                    else:
+                        print(f"    ⚠️  No Vector HTTP input endpoints found (tried /events, /logs, /v1/logs)")
             except Exception as e:
-                print(f"    ⚠️  HTTP API failed: {str(e)[:50]}")
+                print(f"    ⚠️  HTTP API check failed: {str(e)[:50]}")
             
             if success_methods:
                 print(f"    ✅ Successfully sent syslog via: {', '.join(success_methods)}")
@@ -590,7 +617,15 @@ class OneClickIncidentDebugger:
     def _trigger_anomaly_detection(self, test_point: TestDataPoint):
         """Trigger anomaly detection for test data"""
         try:
-            # Call anomaly detection service to process the metric
+            # First check if anomaly detection service is available
+            health_response = requests.get('http://localhost:8080/health', timeout=5)
+            if health_response.status_code != 200:
+                print(f"    ⚠️  Anomaly detection service not healthy: HTTP {health_response.status_code}")
+                return
+                
+            # Try common anomaly detection endpoints
+            endpoints_to_try = ['/trigger_anomaly', '/anomaly', '/detect', '/process']
+            
             payload = {
                 'metric_name': test_point.metric_name,
                 'ship_id': test_point.ship_id,
@@ -600,16 +635,26 @@ class OneClickIncidentDebugger:
                 'tracking_id': test_point.tracking_id
             }
             
-            response = requests.post(
-                'http://localhost:8080/trigger_anomaly',
-                json=payload,
-                timeout=10
-            )
+            for endpoint in endpoints_to_try:
+                try:
+                    response = requests.post(
+                        f'http://localhost:8080{endpoint}',
+                        json=payload,
+                        timeout=10
+                    )
+                    
+                    if response.status_code in [200, 201, 202]:
+                        print(f"    ✅ Anomaly detection triggered: {test_point.tracking_id} (via {endpoint})")
+                        return
+                    elif response.status_code == 404:
+                        continue  # Try next endpoint
+                    else:
+                        print(f"    ⚠️  Anomaly endpoint {endpoint} failed: HTTP {response.status_code}")
+                        
+                except Exception:
+                    continue
             
-            if response.status_code in [200, 201]:
-                print(f"    ✅ Anomaly detection triggered: {test_point.tracking_id}")
-            else:
-                print(f"    ⚠️  Anomaly trigger failed: HTTP {response.status_code}")
+            print(f"    ⚠️  No working anomaly detection endpoints found (tried {', '.join(endpoints_to_try)})")
                 
         except Exception as e:
             print(f"    ❌ Anomaly trigger error: {str(e)}")
@@ -712,19 +757,32 @@ class OneClickIncidentDebugger:
             response = requests.get('http://localhost:4195/stats', timeout=10)
             
             if response.status_code == 200:
-                stats = response.json()
-                
-                # Look for processing metrics
-                input_count = stats.get('input', {}).get('received', 0)
-                output_count = stats.get('output', {}).get('sent', 0)
-                
-                print(f"    📊 Benthos processed: {input_count} input, {output_count} output")
-                
-                # Check if our data might be in processing
-                if input_count > 0:
-                    print(f"    ✅ Benthos is processing data")
-                else:
-                    print(f"    ❌ Benthos shows no input activity")
+                try:
+                    stats = response.json()
+                    
+                    # Look for processing metrics
+                    input_count = stats.get('input', {}).get('received', 0)
+                    output_count = stats.get('output', {}).get('sent', 0)
+                    
+                    print(f"    📊 Benthos processed: {input_count} input, {output_count} output")
+                    
+                    # Check if our data might be in processing
+                    if input_count > 0:
+                        print(f"    ✅ Benthos is processing data")
+                    else:
+                        print(f"    ❌ Benthos shows no input activity")
+                        
+                except json.JSONDecodeError:
+                    # Benthos might return non-JSON stats, try plain text parsing
+                    stats_text = response.text
+                    print(f"    📊 Benthos stats (text): {stats_text[:200]}...")
+                    if any(word in stats_text.lower() for word in ['received', 'sent', 'input', 'output']):
+                        print(f"    ✅ Benthos appears to be processing data")
+                    else:
+                        print(f"    ⚠️  Unable to parse Benthos stats format")
+                        
+            else:
+                print(f"    ❌ Benthos stats unavailable: HTTP {response.status_code}")
                     
         except Exception as e:
             print(f"    ❌ Benthos tracking error: {str(e)}")
@@ -902,17 +960,25 @@ class OneClickIncidentDebugger:
             self._create_predicted_mismatches(critical_services_down)
         
         try:
+            # First check if ClickHouse container is running
+            container_check = subprocess.run(['docker', 'ps'], capture_output=True, text=True, timeout=5)
+            if 'aiops-clickhouse' not in container_check.stdout:
+                print("    ❌ ClickHouse container is not running")
+                self._add_clickhouse_connectivity_mismatch()
+                return
+            
             # Query recent incidents to check for fallback values
             query = "SELECT ship_id, service, metric_name, metric_value, message FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 100"
             
             credentials = [('admin', 'admin'), ('default', 'clickhouse123'), ('default', '')]
+            connection_errors = []
             
             for user, password in credentials:
                 try:
                     password_flag = f'--password={password}' if password else '--password='
                     cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                           f'--user={user}', password_flag, f'--query={query}']
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                           f'--user={user}', password_flag, f'--query={query}', '--format=TabSeparated']
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
                     
                     if result.returncode == 0:
                         if result.stdout.strip():
@@ -922,11 +988,17 @@ class OneClickIncidentDebugger:
                             if not critical_services_down:  # Only add if we haven't already predicted issues
                                 self._add_no_data_mismatch()
                         break
+                    else:
+                        error_msg = result.stderr.strip() if result.stderr else f"Exit code {result.returncode}"
+                        connection_errors.append(f'{user}: {error_msg[:100]}')
                         
-                except Exception:
-                    continue
+                except subprocess.TimeoutExpired:
+                    connection_errors.append(f'{user}: Connection timeout')
+                except Exception as e:
+                    connection_errors.append(f'{user}: {str(e)[:100]}')
             else:
                 print("    ❌ Could not connect to ClickHouse to check data quality")
+                print(f"    💡 Connection attempts: {'; '.join(connection_errors)}")
                 # If we can't connect to ClickHouse but some services claim to be healthy, this is suspicious
                 if not critical_services_down:
                     self._add_clickhouse_connectivity_mismatch()
