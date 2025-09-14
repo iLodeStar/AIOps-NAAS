@@ -93,6 +93,8 @@ logs/
 
 # Test reports and artifacts
 reports/
+validate_oneclick_fixes.py
+test_oneclick_comprehensive.py
 *.junit.xml
 
 # Misc
