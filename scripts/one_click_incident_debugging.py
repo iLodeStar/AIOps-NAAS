@@ -187,6 +187,7 @@ class OneClickIncidentDebugger:
             ('NATS', 'http://localhost:8222/healthz', ['http://localhost:8222/connz']),
             ('Benthos', 'http://localhost:4195/ping', ['http://localhost:4195/stats']),
             ('Victoria Metrics', 'http://localhost:8428/health', []),
+            ('Anomaly Detection', 'http://localhost:8080/health', []),
             ('Incident API', 'http://localhost:9081/health', []),
             ('Device Registry', 'http://localhost:8081/health', [])
         ]
@@ -434,13 +435,14 @@ class OneClickIncidentDebugger:
         try:
             payload = {
                 'hostname': test_point.hostname,
+                'ip_address': '192.168.1.100',  # Add required IP address field
                 'ship_id': test_point.ship_id,
                 'device_type': 'test_device',
                 'location': 'test_location'
             }
             
             response = requests.post(
-                'http://localhost:8081/devices',
+                'http://localhost:8081/devices/register',  # Use correct endpoint
                 json=payload,
                 timeout=10
             )
@@ -1124,7 +1126,7 @@ class OneClickIncidentDebugger:
                     root_cause='Hostname to ship_id mapping missing or device registry not accessible',
                     fix_steps=[
                         'Verify device registry service is running and accessible',
-                        f'Register hostname mapping: curl -X POST http://localhost:8081/devices -d \'{{"hostname":"{test_point.hostname}","ship_id":"{test_point.ship_id}"}}\'',
+                        f'Register hostname mapping: curl -X POST http://localhost:8081/devices/register -H "Content-Type: application/json" -d \'{{"hostname":"{test_point.hostname}","ip_address":"192.168.1.100","ship_id":"{test_point.ship_id}"}}\'',
                         'Ensure Vector extracts hostname properly from log sources',
                         'Check Benthos device registry integration is working'
                     ]
@@ -1207,9 +1209,9 @@ class OneClickIncidentDebugger:
                 "1. Start all services: `docker-compose up -d`",
                 f"2. Register device mapping:",
                 f"   ```bash",
-                f"   curl -X POST http://localhost:8081/devices \\",
+                f"   curl -X POST http://localhost:8081/devices/register \\",
                 f"     -H 'Content-Type: application/json' \\",
-                f"     -d '{{\"hostname\":\"{test_point.hostname}\",\"ship_id\":\"{test_point.ship_id}\"}}'",
+                f"     -d '{{\"hostname\":\"{test_point.hostname}\",\"ip_address\":\"192.168.1.100\",\"ship_id\":\"{test_point.ship_id}\"}}'",
                 f"   ```"
             ]
             
