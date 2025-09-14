@@ -348,7 +348,7 @@ pipeline:
     - cache:
         resource: "correlation_cache"  
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_\" + json(\"metric_name\") }"
+        key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } }"
         value: "${! content() }"
         ttl: "600s"  # 10 minute correlation window
         
@@ -356,7 +356,7 @@ pipeline:
     - cache:
         resource: "temporal_cache"
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_\" + (timestamp_unix() / 300 | floor).string() }"
+        key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + (timestamp_unix() / 300 | floor).string() }"
         value: "${! content() }"
         ttl: "900s"  # 15 minute temporal correlation window
 
@@ -369,7 +369,7 @@ pipeline:
             - cache:
                 resource: "correlation_cache"
                 operator: "get"  
-                key: "${! if json(\"metric_name\") == \"cpu_usage\" { json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_memory_usage\" } else { json(\"ship_id\") + \"_\" + json(\"event_source\") + \"_cpu_usage\" } }"
+                key: "${! if json(\"metric_name\") == \"cpu_usage\" { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_memory_usage\" } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_cpu_usage\" } }"
       
       - check: json("event_source") == "basic_metrics"
         processors:
@@ -378,7 +378,7 @@ pipeline:
             - cache:
                 resource: "correlation_cache"
                 operator: "get"
-                key: "${! json(\"ship_id\") + \"_application_logs_log_anomaly\" }"
+                key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_application_logs_log_anomaly\" }"
                 
       - check: json("event_source") == "application_logs" 
         processors:
@@ -387,7 +387,7 @@ pipeline:
             - cache:
                 resource: "correlation_cache"
                 operator: "get"
-                key: "${! json(\"ship_id\") + \"_basic_metrics_cpu_usage\" }"
+                key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_basic_metrics_cpu_usage\" }"
 
     # Create comprehensive correlated incidents with safe null handling
     - mapping: |
@@ -454,10 +454,10 @@ pipeline:
           "debug": 1
         }
         
-        let current_severity = if this.severity != null && this.severity != "" { this.severity } else { "info" }
-        let severity_priority = if severity_map.get(current_severity) != null { severity_map.get(current_severity) } else { 1 }
-        let related_severity = if related != null && related.severity != null && related.severity != "" { related.severity } else { "info" }
-        let related_priority = if related != null && severity_map.get(related_severity) != null { severity_map.get(related_severity) } else { 0 }
+        let current_severity = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
+        let severity_priority = if current_severity != null && severity_map.get(current_severity) != null { severity_map.get(current_severity) } else { 1 }
+        let related_severity = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
+        let related_priority = if related != null && related_severity != null && severity_map.get(related_severity) != null { severity_map.get(related_severity) } else { 0 }
         
         # Calculate maximum priority safely 
         let max_priority = if severity_priority >= related_priority { severity_priority } else { related_priority }
@@ -502,14 +502,14 @@ pipeline:
             resource: "suppression_cache"
             operator: "get"
             # More granular suppression key including metric_name and service
-            key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
+            key: "${! if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_incident\" } + \"_\" + if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + if json(\"service\") != null { json(\"service\") } else { \"unknown\" } }"
 
     # CRITICAL FIX: Additional suppression for tracking_id-based deduplication
     - try:
         - cache:
             resource: "tracking_suppression_cache"
             operator: "get"
-            key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+            key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
 
     # Only process if not suppressed by either check
     - switch:
@@ -519,7 +519,7 @@ pipeline:
           - cache:
               resource: "suppression_cache"
               operator: "set" 
-              key: "${! json(\"incident_type\") + \"_\" + json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + json(\"service\") }"
+              key: "${! if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_incident\" } + \"_\" + if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + if json(\"service\") != null { json(\"service\") } else { \"unknown\" } }"
               value: "${! json(\"incident_id\") }"  # Store the incident ID for reference
               ttl: "900s"  # Suppress for 15 minutes (longer for better deduplication)
               
@@ -527,7 +527,7 @@ pipeline:
           - cache:
               resource: "tracking_suppression_cache"
               operator: "set"
-              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { json(\"ship_id\") + \"_\" + json(\"metric_name\") + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
               value: "${! json(\"incident_id\") }"
               ttl: "1800s"  # Suppress for 30 minutes for tracking-based deduplication
               
