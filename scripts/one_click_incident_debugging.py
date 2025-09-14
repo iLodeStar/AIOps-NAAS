@@ -301,9 +301,11 @@ class OneClickIncidentDebugger:
         errors = []
         for user, password in credentials_to_try:
             try:
-                password_arg = f'--password={password}' if password else '--password='
                 cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                       f'--user={user}', password_arg, '--query=SELECT 1', '--format=TabSeparated']
+                       f'--user={user}']
+                if password:
+                    cmd.append(f'--password={password}')
+                cmd.extend(['--query=SELECT 1', '--format=TabSeparated'])
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                 
                 if result.returncode == 0 and result.stdout.strip() == '1':
@@ -799,7 +801,10 @@ class OneClickIncidentDebugger:
             for user, password in credentials:
                 try:
                     cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                           f'--user={user}', f'--password={password}', f'--query={query}']
+                           f'--user={user}']
+                    if password:
+                        cmd.append(f'--password={password}')
+                    cmd.extend([f'--query={query}'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0:
@@ -855,7 +860,10 @@ class OneClickIncidentDebugger:
             for user, password in credentials:
                 try:
                     cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                           f'--user={user}', f'--password={password}', f'--query={query}']
+                           f'--user={user}']
+                    if password:
+                        cmd.append(f'--password={password}')
+                    cmd.extend([f'--query={query}'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0:
@@ -928,7 +936,10 @@ class OneClickIncidentDebugger:
             for user, password in credentials:
                 try:
                     cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                           f'--user={user}', f'--password={password}', f'--query={query}']
+                           f'--user={user}']
+                    if password:
+                        cmd.append(f'--password={password}')
+                    cmd.extend([f'--query={query}'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0 and result.stdout.strip():
@@ -975,9 +986,11 @@ class OneClickIncidentDebugger:
             
             for user, password in credentials:
                 try:
-                    password_flag = f'--password={password}' if password else '--password='
                     cmd = ['docker', 'exec', 'aiops-clickhouse', 'clickhouse-client',
-                           f'--user={user}', password_flag, f'--query={query}', '--format=TabSeparated']
+                           f'--user={user}']
+                    if password:
+                        cmd.append(f'--password={password}')
+                    cmd.extend([f'--query={query}', '--format=TabSeparated'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
                     
                     if result.returncode == 0:
