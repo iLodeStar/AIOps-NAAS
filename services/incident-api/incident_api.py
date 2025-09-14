@@ -577,4 +577,4 @@ async def create_test_incident():
     return {"status": "created", "incident_id": test_incident["incident_id"]}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8081)
+    uvicorn.run(app, host="0.0.0.0", port=9081)
