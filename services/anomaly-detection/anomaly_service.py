@@ -362,15 +362,90 @@ class ClickHouseClient:
         except:
             return False
 
+class DeviceRegistryClient:
+    """Client for querying the Device Registry service for ship_id/device_id mappings"""
+    
+    def __init__(self, base_url: str = "http://device-registry:8080"):
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+        self._cache = {}  # Simple in-memory cache for lookups
+        self._cache_ttl = 300  # 5 minute cache TTL
+    
+    def _get_cache_key(self, hostname: str) -> str:
+        """Generate cache key for hostname lookup"""
+        return f"registry_{hostname}"
+    
+    def _is_cache_valid(self, cache_entry: dict) -> bool:
+        """Check if cache entry is still valid"""
+        if not cache_entry or 'timestamp' not in cache_entry:
+            return False
+        return (time.time() - cache_entry['timestamp']) < self._cache_ttl
+    
+    def lookup_hostname(self, hostname: str) -> Optional[Dict[str, Any]]:
+        """Lookup ship_id and device info by hostname or IP address with caching"""
+        if not hostname or hostname in ['unknown', 'localhost', '']:
+            return None
+            
+        cache_key = self._get_cache_key(hostname)
+        
+        # Check cache first
+        if cache_key in self._cache and self._is_cache_valid(self._cache[cache_key]):
+            logger.debug(f"Registry cache hit for hostname: {hostname}")
+            return self._cache[cache_key]['data']
+        
+        try:
+            # Query the device registry
+            response = self.session.get(
+                f"{self.base_url}/lookup/{hostname}", 
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                mapping = result.get('mapping')
+                
+                if mapping:
+                    # Cache the successful lookup
+                    self._cache[cache_key] = {
+                        'data': mapping,
+                        'timestamp': time.time()
+                    }
+                    
+                    logger.debug(f"Registry lookup success for {hostname}: {mapping['ship_id']}")
+                    return mapping
+                    
+            elif response.status_code == 404:
+                logger.debug(f"Hostname {hostname} not found in registry")
+                return None
+            else:
+                logger.warning(f"Registry lookup failed for {hostname}: HTTP {response.status_code}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Registry lookup error for {hostname}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected registry lookup error for {hostname}: {e}")
+            return None
+    
+    def health_check(self) -> bool:
+        """Check if Device Registry service is healthy"""
+        try:
+            response = self.session.get(f"{self.base_url}/health", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+
 class AnomalyDetectionService:
     """Main anomaly detection service with historical analysis"""
     
     def __init__(self):
         self.vm_client = VictoriaMetricsClient()
         self.clickhouse_client = ClickHouseClient()
+        self.device_registry_client = DeviceRegistryClient()
         self.detectors = SimpleAnomalyDetectors()
         self.nats_client = None
-        self.health_status = {"healthy": False, "vm_connected": False, "nats_connected": False, "clickhouse_connected": False}
+        self.health_status = {"healthy": False, "vm_connected": False, "nats_connected": False, "clickhouse_connected": False, "registry_connected": False}
         
         # Metric queries to monitor
         self.metric_queries = [
@@ -496,42 +571,80 @@ class AnomalyDetectionService:
             return 0.6
     
     def _extract_ship_id(self, log_data: dict) -> str:
-        """Extract ship_id from log data with intelligent fallbacks"""
+        """Extract ship_id from log data with device registry lookup and intelligent fallbacks"""
         # Try direct ship_id field first
         if log_data.get('ship_id'):
             return log_data['ship_id']
         
-        # Try to derive from hostname
+        # Try device registry lookup using hostname
         host = log_data.get('host', '')
-        if host and '-' in host:
-            # e.g., "dhruv-system-01" -> "dhruv-ship"
-            return host.split('-')[0] + '-ship'
-        elif host and host != 'unknown':
-            return host + '-ship'
+        if host and host != 'unknown':
+            registry_result = self.device_registry_client.lookup_hostname(host)
+            if registry_result and registry_result.get('ship_id'):
+                logger.debug(f"Registry lookup success for host {host}: {registry_result['ship_id']}")
+                return registry_result['ship_id']
         
-        # Try labels
+        # Try device registry lookup using IP address from metadata
+        source_host = log_data.get('metadata', {}).get('source_host', '') if isinstance(log_data.get('metadata'), dict) else ''
+        if source_host and source_host != host and source_host != 'unknown':
+            registry_result = self.device_registry_client.lookup_hostname(source_host)
+            if registry_result and registry_result.get('ship_id'):
+                logger.debug(f"Registry lookup success for source_host {source_host}: {registry_result['ship_id']}")
+                return registry_result['ship_id']
+        
+        # Try to derive from hostname as fallback (existing logic)
+        if host and '-' in host:
+            # e.g., "ubuntu-system-01" -> "ubuntu-ship" 
+            derived_ship = host.split('-')[0] + '-ship'
+            logger.debug(f"Derived ship_id from hostname {host}: {derived_ship}")
+            return derived_ship
+        elif host and host != 'unknown':
+            derived_ship = host + '-ship'
+            logger.debug(f"Derived ship_id from hostname {host}: {derived_ship}")
+            return derived_ship
+        
+        # Try labels as another fallback
         labels = log_data.get('labels', {})
         if labels.get('ship_id'):
             return labels['ship_id']
         
+        logger.warning(f"Could not resolve ship_id for log data with host={host}, source_host={source_host}")
         return 'unknown-ship'
     
     def _extract_device_id(self, log_data: dict) -> str:
-        """Extract device_id from log data"""
+        """Extract device_id from log data with device registry lookup"""
         # Try direct device_id field
         if log_data.get('device_id'):
             return log_data['device_id']
         
-        # Try to derive from hostname  
+        # Try device registry lookup using hostname
         host = log_data.get('host', '')
         if host and host != 'unknown':
+            registry_result = self.device_registry_client.lookup_hostname(host)
+            if registry_result and registry_result.get('device_id'):
+                logger.debug(f"Registry device_id lookup success for host {host}: {registry_result['device_id']}")
+                return registry_result['device_id']
+        
+        # Try device registry lookup using IP address from metadata
+        source_host = log_data.get('metadata', {}).get('source_host', '') if isinstance(log_data.get('metadata'), dict) else ''
+        if source_host and source_host != host and source_host != 'unknown':
+            registry_result = self.device_registry_client.lookup_hostname(source_host)
+            if registry_result and registry_result.get('device_id'):
+                logger.debug(f"Registry device_id lookup success for source_host {source_host}: {registry_result['device_id']}")
+                return registry_result['device_id']
+        
+        # Fallback to hostname if registry lookup failed
+        if host and host != 'unknown':
+            logger.debug(f"Using hostname as device_id fallback: {host}")
             return host
         
         # Try service name
         service = log_data.get('service', '')
         if service and service != 'unknown':
+            logger.debug(f"Using service name as device_id fallback: {service}")
             return service
         
+        logger.warning(f"Could not resolve device_id for log data with host={host}, source_host={source_host}")
         return 'unknown-device'
     
     async def publish_anomaly(self, event: AnomalyEvent):
@@ -621,24 +734,28 @@ class AnomalyDetectionService:
                 logger.error(f"Error processing metric {metric_query.name}: {e}")
     
     async def health_check_loop(self):
-        """Periodic health check loop with ClickHouse"""
+        """Periodic health check loop with ClickHouse and Device Registry"""
         while True:
             try:
                 vm_healthy = self.vm_client.health_check()
                 clickhouse_healthy = self.clickhouse_client.health_check()
+                registry_healthy = self.device_registry_client.health_check()
                 nats_healthy = self.nats_client and not self.nats_client.is_closed
                 
                 self.health_status["vm_connected"] = vm_healthy
                 self.health_status["clickhouse_connected"] = clickhouse_healthy
+                self.health_status["registry_connected"] = registry_healthy
                 self.health_status["nats_connected"] = nats_healthy
-                self.health_status["healthy"] = vm_healthy and clickhouse_healthy and nats_healthy
+                self.health_status["healthy"] = vm_healthy and clickhouse_healthy and nats_healthy and registry_healthy
                 
-                logger.info(f"Health check - VM: {vm_healthy}, ClickHouse: {clickhouse_healthy}, NATS: {nats_healthy}")
+                logger.info(f"Health check - VM: {vm_healthy}, ClickHouse: {clickhouse_healthy}, Registry: {registry_healthy}, NATS: {nats_healthy}")
                 
                 if not vm_healthy:
                     logger.warning("VictoriaMetrics is not healthy")
                 if not clickhouse_healthy:
                     logger.warning("ClickHouse is not healthy")
+                if not registry_healthy:
+                    logger.warning("Device Registry is not healthy")
                 if not nats_healthy:
                     logger.warning("NATS is not healthy")
                     
