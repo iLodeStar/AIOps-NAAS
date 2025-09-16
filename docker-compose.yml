@@ -237,6 +237,7 @@ services:
     command: ["--config", "/etc/vector/vector.toml"]
     ports:
       - "8686:8686"         # HTTP API and metrics
+      - "8687:8687"         # Vendor-specific metrics (Prometheus exporter)
       - "1517:1514/udp"     # UDP syslog port
       - "1516:1515/tcp"     # TCP syslog port
     depends_on:

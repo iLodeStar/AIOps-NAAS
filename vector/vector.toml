@@ -38,6 +38,18 @@ type = "file"
 include = ["/var/log/sample/*.log"]
 read_from = "beginning"
 
+# Windows Event Log support (via file or network source)
+[sources.windows_eventlog]
+type = "file"
+include = ["/var/log/windows/*.json", "/var/log/windows/*.xml"]
+read_from = "beginning"
+
+# JSON logs source for structured vendor logs
+[sources.json_logs]
+type = "file"
+include = ["/var/log/json/*.json", "/var/log/structured/*.jsonl"]
+read_from = "beginning"
+
 # ----------------------
 # Transforms
 # ----------------------
@@ -65,7 +77,8 @@ del(.counter)
 del(.gauge)
 '''
 
-[transforms.syslog_for_logs]
+# Simple syslog processing with basic vendor detection
+[transforms.syslog_vendor_parse]
 type = "remap"
 inputs = ["syslog_udp", "syslog_tcp"]
 source = '''
@@ -81,6 +94,94 @@ source = '''
 .service = if exists(.appname) { .appname } else { "system" }
 .raw_log = encode_json(.)
 .labels = {}
+
+# Initialize vendor fields with defaults
+.vendor = ""
+.device_type = ""
+.cruise_segment = ""
+.facility = if exists(.facility) { to_string!(.facility) } else { "" }
+.severity = "info"
+.category = ""
+.event_id = ""
+.ip_address = "0.0.0.0"
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+
+# Basic vendor detection from message content
+msg = to_string(.message)
+
+# Cisco detection - look for %FACILITY-SEVERITY-MNEMONIC pattern
+if contains(msg, "%") && contains(msg, "-") {
+    .vendor = "cisco"
+    .category = "system"
+}
+
+# Juniper detection - look for facility.severity pattern  
+if contains(msg, ".info:") || contains(msg, ".error:") || contains(msg, ".warning:") {
+    .vendor = "juniper"
+    .category = "system"
+}
+
+# Fortinet detection - look for devname= pattern
+if contains(msg, "devname=") && contains(msg, "logid=") {
+    .vendor = "fortinet"
+    .category = "security"
+}
+'''
+
+[transforms.syslog_device_classification]
+type = "remap"
+inputs = ["syslog_vendor_parse"]
+source = '''
+# Simple device type classification based on hostname patterns
+hostname = downcase(to_string!(.host))
+
+# Device type classification using simple string matching
+if contains(hostname, "sw") || contains(hostname, "switch") {
+    .device_type = "switch"
+} else if contains(hostname, "rtr") || contains(hostname, "router") || contains(hostname, "gw") {
+    .device_type = "router"  
+} else if contains(hostname, "fw") || contains(hostname, "firewall") || contains(hostname, "asa") {
+    .device_type = "firewall"
+} else if contains(hostname, "ap") || contains(hostname, "wlc") || contains(hostname, "wireless") {
+    .device_type = "access_point"
+} else if contains(hostname, "srv") || contains(hostname, "server") {
+    .device_type = "server"
+} else if contains(hostname, "vsat") || contains(hostname, "modem") || contains(hostname, "satellite") {
+    .device_type = "vsat_terminal"
+} else {
+    .device_type = "unknown"
+}
+
+# Cruise segment classification based on hostname patterns  
+if contains(hostname, "bridge") || contains(hostname, "nav") || contains(hostname, "helm") {
+    .cruise_segment = "navigation"
+} else if contains(hostname, "engine") || contains(hostname, "motor") || contains(hostname, "generator") {
+    .cruise_segment = "propulsion"
+} else if contains(hostname, "guest") || contains(hostname, "dining") || contains(hostname, "cabin") {
+    .cruise_segment = "guest_services"
+} else if contains(hostname, "security") || contains(hostname, "fire") || contains(hostname, "safety") {
+    .cruise_segment = "safety_security"
+} else if contains(hostname, "comms") || contains(hostname, "wifi") || contains(hostname, "satellite") {
+    .cruise_segment = "communications"
+} else if contains(hostname, "power") || contains(hostname, "hvac") || contains(hostname, "utility") {
+    .cruise_segment = "utilities"
+} else if contains(hostname, "crew") || contains(hostname, "galley") || contains(hostname, "maintenance") {
+    .cruise_segment = "crew_areas"
+} else if contains(hostname, "deck") || contains(hostname, "cargo") || contains(hostname, "tender") {
+    .cruise_segment = "deck_operations"
+} else {
+    .cruise_segment = "general"
+}
+'''
+
+# For backward compatibility, keep the original transform name but point to enhanced version
+[transforms.syslog_for_logs]
+type = "remap"
+inputs = ["syslog_device_classification"]
+source = '''
+# Pass-through transform for backward compatibility
+# All processing is now done in the vendor parsing transforms above
+true
 '''
 
 [transforms.file_logs_processed]
@@ -99,6 +200,70 @@ source = '''
 .service = if exists(.service) { .service } else { "file-service" }
 .raw_log = encode_json(.)
 .labels = if exists(.labels) { .labels } else { {} }
+
+# Initialize vendor fields for file logs
+.vendor = ""
+.device_type = "server"  # File logs typically from servers
+.cruise_segment = "general"
+.facility = "local0"
+.severity = "info"
+.category = ""
+.event_id = ""
+.ip_address = "0.0.0.0"
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+# Windows Event Log processing
+# Simplified Windows Event Log processing
+[transforms.windows_eventlog_processed] 
+type = "remap"
+inputs = ["windows_eventlog"]
+source = '''
+.timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+.message = to_string!(.message)
+.level = "INFO"
+.source = "windows_eventlog"
+.host = "windows-server"
+.service = "windows-system"
+.raw_log = encode_json(.)
+.labels = {}
+
+# Windows-specific vendor fields
+.vendor = "microsoft"
+.device_type = "server"
+.cruise_segment = "general"
+.facility = "windows"
+.severity = "info"
+.category = "system"
+.event_id = ""
+.ip_address = "0.0.0.0"
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+# Simplified JSON structured logs processing
+[transforms.json_logs_processed]
+type = "remap"
+inputs = ["json_logs"]
+source = '''
+.timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+.message = to_string!(.message)
+.level = "INFO"
+.source = "json_structured"
+.host = "json-host"
+.service = "json-service"
+.raw_log = encode_json(.)
+.labels = {}
+
+# JSON vendor fields  
+.vendor = "generic"
+.device_type = "server"
+.cruise_segment = "general"
+.facility = "application"
+.severity = "info"
+.category = "structured"
+.event_id = ""
+.ip_address = "0.0.0.0"
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 '''
 
 [transforms.snmp_for_logs]
@@ -108,10 +273,10 @@ source = '''
 .timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 .level = "INFO"
 
-device_type, err = if exists(.device_type) { to_string(.device_type) } else { "unknown-type" }
-device_id, err = if exists(.device_id) { to_string(.device_id) } else { "unknown-id" }
-metric_name, err = if exists(.metric_name) { to_string(.metric_name) } else { "unknown-metric" }
-value, err = if exists(.value) { to_string(.value) } else { "null" }
+device_type = if exists(.device_type) { to_string!(.device_type) } else { "unknown-type" }
+device_id = if exists(.device_id) { to_string!(.device_id) } else { "unknown-id" }
+metric_name = if exists(.metric_name) { to_string!(.metric_name) } else { "unknown-metric" }
+value = if exists(.value) { to_string!(.value) } else { "null" }
 
 .message = "SNMP: " + device_type + " " + device_id + " - " + metric_name + " = " + value
 
@@ -120,6 +285,17 @@ value, err = if exists(.value) { to_string(.value) } else { "null" }
 .service = if exists(.device_type) { .device_type } else { "network-device" }
 .raw_log = encode_json(.)
 .labels = if exists(.labels) { .labels } else { {} }
+
+# Initialize vendor fields for SNMP logs
+.vendor = ""
+.device_type = device_type
+.cruise_segment = "general"
+.facility = "snmp"
+.severity = "info"
+.category = "telemetry"
+.event_id = ""
+.ip_address = if exists(.device_ip) { .device_ip } else { "0.0.0.0" }
+.ingestion_time = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 '''
 
 [transforms.app_logs_for_logs]
@@ -151,9 +327,9 @@ if exists(.thread) { .labels.thread = .thread }
 # ----------------------
 [transforms.anomalous_logs_filter]
 type = "filter"
-inputs = ["syslog_for_logs", "app_logs_for_logs"]
+inputs = ["syslog_for_logs", "app_logs_for_logs", "windows_eventlog_processed", "json_logs_processed"]
 condition = '''
-exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
+exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg" || .severity == "critical" || .severity == "error" || .severity == "emergency") ||
 exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
 (match(to_string!(.message), r'(?i)(error|critical|fail|timeout|connection.*lost|database.*error|system.*failure|alert|emergency|exception|stack.*trace)') != null)
 '''
@@ -170,11 +346,11 @@ source = '''
 .tracking_id = if .matched != null { .matched[0] } else { null }
 
 .anomaly_severity = if exists(.severity) {
-  if (.severity == "emerg" || .severity == "alert" || .severity == "crit") {
+  if (.severity == "emerg" || .severity == "alert" || .severity == "crit" || .severity == "emergency" || .severity == "critical") {
     "critical"
-  } else if .severity == "err" {
+  } else if (.severity == "err" || .severity == "error") {
     "high"
-  } else if .severity == "warning" {
+  } else if (.severity == "warning") {
     "medium"
   } else {
     "low"
@@ -192,14 +368,89 @@ source = '''
 } else {
   "medium"
 }
+
+# Include vendor context in anomaly events with safe string conversion
+vendor_str = if exists(.vendor) { to_string!(.vendor) } else { "" }
+device_type_str = if exists(.device_type) { to_string!(.device_type) } else { "" }
+cruise_segment_str = if exists(.cruise_segment) { to_string!(.cruise_segment) } else { "" }
+facility_str = if exists(.facility) { to_string!(.facility) } else { "" }
+category_str = if exists(.category) { to_string!(.category) } else { "" }
+event_id_str = if exists(.event_id) { to_string!(.event_id) } else { "" }
+
+.vendor_context = {
+  "vendor": vendor_str,
+  "device_type": device_type_str,
+  "cruise_segment": cruise_segment_str,
+  "facility": facility_str,
+  "category": category_str,
+  "event_id": event_id_str
+}
 '''
 
+# ----------------------
+# Observability & Metrics
+# ----------------------
+[transforms.vendor_metrics]
+type = "log_to_metric"
+inputs = ["syslog_device_classification", "windows_eventlog_processed", "json_logs_processed"]
+
+# Track log ingestion rate per vendor
+[[transforms.vendor_metrics.metrics]]
+type = "counter"
+field = "vendor"
+name = "vector_vendor_logs_total"
+namespace = "aiops"
+tags.vendor = "{{vendor}}"
+tags.device_type = "{{device_type}}"
+tags.cruise_segment = "{{cruise_segment}}"
+tags.source = "{{source}}"
+
+# Track parsing errors
+[[transforms.vendor_metrics.metrics]]
+type = "counter" 
+field = "parsing_error"
+name = "vector_vendor_parsing_errors_total"
+namespace = "aiops"
+tags.vendor = "{{vendor}}"
+tags.error_type = "{{parsing_error}}"
+condition = 'exists(.parsing_error)'
+
+# Track severity distribution 
+[[transforms.vendor_metrics.metrics]]
+type = "counter"
+field = "severity"
+name = "vector_vendor_severity_total"
+namespace = "aiops"
+tags.vendor = "{{vendor}}"
+tags.device_type = "{{device_type}}"
+tags.severity = "{{severity}}"
+
+# Track ingestion latency (log timestamp vs ingestion time)
+[[transforms.vendor_metrics.metrics]]
+type = "histogram"
+field = "ingestion_latency_ms"
+name = "vector_vendor_ingestion_latency_seconds"
+namespace = "aiops"
+tags.vendor = "{{vendor}}"
+tags.device_type = "{{device_type}}"
+
+[transforms.calculate_latency]
+type = "remap"
+inputs = ["syslog_device_classification", "windows_eventlog_processed", "json_logs_processed"]
+source = '''
+# Simple latency calculation - just set a default for now
+.ingestion_latency_ms = 100.0
+
+# Pass through all existing fields
+true
+'''
+# ----------------------
 # ----------------------
 # Sinks
 # ----------------------
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
+inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "windows_eventlog_processed", "json_logs_processed", "snmp_for_logs", "app_logs_for_logs", "calculate_latency"]
 endpoint = "http://clickhouse:8123"
 database = "logs"
 table = "raw"
@@ -212,6 +463,13 @@ batch.timeout_secs = 5
 strategy = "basic"
 user = "${CLICKHOUSE_USER:-default}"
 password = "${CLICKHOUSE_PASSWORD:-clickhouse123}"
+
+# Vendor metrics to VictoriaMetrics
+[sinks.vendor_metrics_prometheus]
+type = "prometheus_exporter"
+inputs = ["vendor_metrics"]
+address = "0.0.0.0:8687"
+default_namespace = "aiops"
 
 [sinks.anomalous_logs_nats]
 type = "nats"
@@ -230,10 +488,34 @@ inputs = ["syslog_for_logs"]
 [sinks.syslog_debug.encoding]
 codec = "json"
 
+[sinks.vendor_parsing_debug]
+type = "console"
+inputs = ["syslog_vendor_parse"]
+[sinks.vendor_parsing_debug.encoding]
+codec = "json"
+
+[sinks.device_classification_debug]
+type = "console"
+inputs = ["syslog_device_classification"]
+[sinks.device_classification_debug.encoding]
+codec = "json"
+
 [sinks.file_debug]
 type = "console"
 inputs = ["file_logs_processed"]
 [sinks.file_debug.encoding]
+codec = "json"
+
+[sinks.windows_debug]
+type = "console"
+inputs = ["windows_eventlog_processed"]
+[sinks.windows_debug.encoding]
+codec = "json"
+
+[sinks.json_debug]
+type = "console"
+inputs = ["json_logs_processed"]
+[sinks.json_debug.encoding]
 codec = "json"
 
 [sinks.snmp_debug]
