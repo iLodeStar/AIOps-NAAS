@@ -133,11 +133,20 @@ pipeline:
           null
         }
         
+        # CRITICAL DEBUG: Add detailed ship_id debug information
+        root.ship_id_debug = {
+          "original_ship_id": if this.ship_id != null { this.ship_id } else { "null" },
+          "metadata_exists": this.metadata != null,
+          "metadata_ship_id": if this.metadata != null && this.metadata.ship_id != null { this.metadata.ship_id } else { "null" },
+          "available_ship_id": if available_ship_id != null { available_ship_id } else { "null" },
+          "processing_timestamp": now()
+        }
+        
         # First check if we already have a valid ship_id from any source
         if available_ship_id != null {
           # Valid ship_id already exists, keep it
           root.ship_id = available_ship_id
-          root.ship_id_source = if this.ship_id != null && this.ship_id != "" { "original_field" } else { "metadata_field" }
+          root.ship_id_source = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") { "original_field" } else { "metadata_field" }
           root.skip_lookup = true
         } else {
           # Need to resolve ship_id via registry lookup
@@ -569,13 +578,22 @@ pipeline:
           "debug": 1
         }
         
+        # CRITICAL FIX: Ensure severity values are never null with explicit defaults
         let current_severity = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
-        let severity_priority = if current_severity != null && severity_map.get(current_severity) != null { severity_map.get(current_severity) } else { 1 }
+        let severity_priority = if severity_map.get(current_severity) != null { severity_map.get(current_severity) } else { 1 }
         let related_severity = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
-        let related_priority = if related != null && related_severity != null && severity_map.get(related_severity) != null { severity_map.get(related_severity) } else { 0 }
+        let related_priority = if severity_map.get(related_severity) != null { severity_map.get(related_severity) } else { if related != null { 1 } else { 0 } }
         
-        # Calculate maximum priority safely 
-        let max_priority = if severity_priority >= related_priority { severity_priority } else { related_priority }
+        # CRITICAL FIX: Calculate maximum priority safely with explicit null protection
+        let max_priority = if severity_priority != null && related_priority != null {
+          if severity_priority >= related_priority { severity_priority } else { related_priority }
+        } else if severity_priority != null {
+          severity_priority
+        } else if related_priority != null {
+          related_priority
+        } else {
+          1  # Ultimate fallback
+        }
         
         # Set incident severity based on max priority
         root.incident_severity = if max_priority == 4 {
@@ -599,12 +617,14 @@ pipeline:
         
         # Add debug information with guaranteed non-null values
         root.debug_priorities = {
-          "severity_priority": severity_priority,
-          "related_priority": related_priority,
-          "severity_value": current_severity,
+          "severity_priority": if severity_priority != null { severity_priority } else { 1 },
+          "related_priority": if related_priority != null { related_priority } else { 0 },
+          "severity_value": if current_severity != null { current_severity } else { "info" },
           "related_exists": related != null,
-          "max_priority": max_priority,
-          "event_count": all_events.length()
+          "max_priority": if max_priority != null { max_priority } else { 1 },
+          "event_count": all_events.length(),
+          "original_severity": if this.severity != null { this.severity } else { "null" },
+          "related_severity": if related != null && related.severity != null { related.severity } else { "null" }
         }
         
         # Ensure all required fields are never null
