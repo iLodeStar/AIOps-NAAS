@@ -124,11 +124,20 @@ pipeline:
         root.registry_lookup_attempted = false
         root.registry_lookup_success = false
         
-        # First check if we already have a valid ship_id
-        if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+        # CRITICAL FIX: Check for ship_id in multiple locations including metadata
+        let available_ship_id = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+          this.ship_id
+        } else if this.metadata != null && this.metadata.ship_id != null && this.metadata.ship_id != "" && !this.metadata.ship_id.contains("unknown") {
+          this.metadata.ship_id
+        } else {
+          null
+        }
+        
+        # First check if we already have a valid ship_id from any source
+        if available_ship_id != null {
           # Valid ship_id already exists, keep it
-          root.ship_id = this.ship_id
-          root.ship_id_source = "original_field"
+          root.ship_id = available_ship_id
+          root.ship_id_source = if this.ship_id != null && this.ship_id != "" { "original_field" } else { "metadata_field" }
           root.skip_lookup = true
         } else {
           # Need to resolve ship_id via registry lookup
