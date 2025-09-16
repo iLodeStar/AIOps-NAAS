@@ -141,13 +141,21 @@ class IncidentAPIService:
         """Resolve ship_id using device registry integration"""
         # Try to resolve using device registry first (this is the primary source of truth)
         hostname = None
-        # Look for hostname in common locations
+        # Look for hostname in common locations, including metadata
         if incident_data.get('host'):
             hostname = incident_data['host']
         elif incident_data.get('hostname'):
             hostname = incident_data['hostname']
         elif incident_data.get('labels', {}).get('instance'):
             hostname = incident_data['labels']['instance']
+        elif incident_data.get('metadata', {}).get('host'):
+            hostname = incident_data['metadata']['host']
+        elif incident_data.get('metadata', {}).get('hostname'):
+            hostname = incident_data['metadata']['hostname']
+        elif incident_data.get('metadata', {}).get('source_host'):
+            hostname = incident_data['metadata']['source_host']
+        
+        logger.info(f"🔍 HOSTNAME EXTRACTION - Found hostname: {hostname} from incident data")
         
         if hostname:
             try:
@@ -198,7 +206,17 @@ class IncidentAPIService:
             logger.info(f"  metric_value from input: {incident_data.get('metric_value', 'NOT_PROVIDED')}")
             logger.info(f"  labels from input: {incident_data.get('labels', 'NOT_PROVIDED')}")
             if 'metadata' in incident_data and incident_data['metadata']:
-                logger.info(f"  metadata keys: {list(incident_data['metadata'].keys()) if isinstance(incident_data['metadata'], dict) else 'NOT_DICT'}")
+                metadata = incident_data['metadata']
+                if isinstance(metadata, dict):
+                    logger.info(f"  metadata keys: {list(metadata.keys())}")
+                    # Log key metadata values for debugging
+                    for key in ['host', 'hostname', 'source_host', 'service', 'application', 'metric_name', 'metric_value']:
+                        if key in metadata:
+                            logger.info(f"    metadata.{key}: {metadata[key]}")
+                else:
+                    logger.info(f"  metadata is not dict: {type(metadata)}")
+            else:
+                logger.info(f"  metadata: NOT_PROVIDED")
             
             # Resolve ship_id using device registry integration
             resolved_ship_id = await self.resolve_ship_id(incident_data)
@@ -209,28 +227,62 @@ class IncidentAPIService:
             correlated_events_json = json.dumps(incident_data.get('correlated_events', []))
             metadata_json = json.dumps(incident_data.get('metadata', {}))
             
-            # CRITICAL FIX: Extract and validate all fields properly
-            # Enhanced metric value extraction and validation
+            # CRITICAL FIX: Enhanced metric value extraction and validation
             original_metric_value = incident_data.get('metric_value', 0.0)
             logger.info(f"🔍 METRIC VALUE - Original: {original_metric_value} (type: {type(original_metric_value)})")
             
             metric_value = original_metric_value
-            if not isinstance(metric_value, (int, float)):
-                try:
-                    metric_value = float(metric_value) if metric_value else 0.0
-                    logger.info(f"🔍 METRIC VALUE - Converted to float: {metric_value}")
-                except (ValueError, TypeError):
-                    # Try extracting from message if conversion failed
+            
+            # If we got 0 or invalid value, try extracting from other sources
+            if metric_value == 0 or not isinstance(metric_value, (int, float)):
+                # Check metadata for metric_value
+                metadata = incident_data.get('metadata', {})
+                if isinstance(metadata, dict) and metadata.get('metric_value'):
+                    try:
+                        metric_value = float(metadata['metric_value'])
+                        logger.info(f"🔍 METRIC VALUE - Found in metadata: {metric_value}")
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Try to extract from message content
+                if metric_value == 0:
                     message = incident_data.get('message', '')
                     if 'metric_value=' in message:
                         import re
-                        match = re.search(r'metric_value=([\d.]+)', message)
+                        match = re.search(r'metric_value=([\d.-]+)', message)
                         if match:
-                            metric_value = float(match.group(1))
-                            logger.info(f"🔍 METRIC VALUE - Extracted from message: {metric_value}")
-                        else:
-                            metric_value = 0.0
-                    else:
+                            try:
+                                metric_value = float(match.group(1))
+                                logger.info(f"🔍 METRIC VALUE - Extracted from message: {metric_value}")
+                            except ValueError:
+                                pass
+                    # Look for other numeric patterns in messages
+                    elif message:
+                        import re
+                        # Look for patterns like "CPU: 85%", "Memory: 1.2GB", "Error count: 5"
+                        patterns = [
+                            r'(\d+\.?\d*)%',  # Percentage values
+                            r'(\d+\.?\d*)\s*GB',  # GB values
+                            r'(\d+\.?\d*)\s*MB',  # MB values
+                            r'count:\s*(\d+)',  # Count values
+                            r'(\d+\.?\d*)',  # Any decimal number
+                        ]
+                        for pattern in patterns:
+                            match = re.search(pattern, message, re.IGNORECASE)
+                            if match and metric_value == 0:
+                                try:
+                                    metric_value = float(match.group(1))
+                                    logger.info(f"🔍 METRIC VALUE - Extracted from message pattern: {metric_value}")
+                                    break
+                                except ValueError:
+                                    continue
+                
+                # Try converting if still not a number
+                if not isinstance(metric_value, (int, float)):
+                    try:
+                        metric_value = float(metric_value) if metric_value else 0.0
+                        logger.info(f"🔍 METRIC VALUE - Converted to float: {metric_value}")
+                    except (ValueError, TypeError):
                         metric_value = 0.0
                         logger.warning(f"🔍 METRIC VALUE - Could not parse, using 0.0")
             
@@ -243,10 +295,45 @@ class IncidentAPIService:
                     anomaly_score = 0.0
                     logger.warning(f"🔍 ANOMALY SCORE - Could not parse, using 0.0")
             
-            # CRITICAL FIX: Ensure proper service field handling
-            service_name = incident_data.get('service', 'unknown_service')
+            # CRITICAL FIX: Enhanced service field handling with multiple sources
+            service_name = incident_data.get('service')
+            
+            # Try various sources for service information
+            if not service_name or service_name in ['unknown_service', '']:
+                # Check metadata for service information
+                metadata = incident_data.get('metadata', {})
+                if isinstance(metadata, dict):
+                    if metadata.get('service'):
+                        service_name = metadata['service']
+                        logger.info(f"🔍 SERVICE - Found in metadata: {service_name}")
+                    elif metadata.get('application'):
+                        service_name = metadata['application']
+                        logger.info(f"🔍 SERVICE - Found as application in metadata: {service_name}")
+                
+                # Check labels for service/job information  
+                labels = incident_data.get('labels', {})
+                if isinstance(labels, dict) and (not service_name or service_name == 'unknown_service'):
+                    if labels.get('job'):
+                        service_name = labels['job']
+                        logger.info(f"🔍 SERVICE - Found as job in labels: {service_name}")
+                    elif labels.get('service'):
+                        service_name = labels['service']
+                        logger.info(f"🔍 SERVICE - Found in labels: {service_name}")
+                
+                # Try to extract from detector name or source
+                if not service_name or service_name == 'unknown_service':
+                    detector_name = incident_data.get('detector_name', '')
+                    if 'log' in detector_name.lower():
+                        service_name = 'log_service'
+                    elif 'network' in detector_name.lower():
+                        service_name = 'network_service'
+                    else:
+                        service_name = 'unknown_service'
+            
+            # Ensure we have a valid service name
             if not service_name or service_name == '':
                 service_name = 'unknown_service'
+            
             logger.info(f"🔍 SERVICE RESOLUTION - Input: {incident_data.get('service', 'None')}, Final: {service_name}")
                 
             # CRITICAL FIX: Better incident type mapping
@@ -261,33 +348,59 @@ class IncidentAPIService:
                 incident_severity = 'low'  # Map info/debug to low severity
             logger.info(f"🔍 SEVERITY MAPPING - Input: {incident_data.get('incident_severity', 'None')}, Final: {incident_severity}")
                 
-            # CRITICAL DEBUG: Log metric extraction process
+            # CRITICAL DEBUG: Enhanced metric name extraction process
             original_metric_name = incident_data.get('metric_name', 'unknown_metric')
             logger.info(f"🔍 METRIC NAME EXTRACTION - Input: {original_metric_name}")
             
             # Try to extract metric name from different possible locations
             extracted_metric_name = original_metric_name
             if original_metric_name == 'unknown_metric':
-                # Try extracting from message content
-                message = incident_data.get('message', '')
-                if 'metric_name=' in message:
-                    import re
-                    match = re.search(r'metric_name=([^\s]+)', message)
-                    if match:
-                        extracted_metric_name = match.group(1)
-                        logger.info(f"🔍 METRIC NAME - Extracted from message: {extracted_metric_name}")
+                # Try extracting from metadata first
+                metadata = incident_data.get('metadata', {})
+                if isinstance(metadata, dict) and metadata.get('metric_name'):
+                    extracted_metric_name = metadata['metric_name']
+                    logger.info(f"🔍 METRIC NAME - Found in metadata: {extracted_metric_name}")
                 
                 # Try extracting from labels
-                labels = incident_data.get('labels', {})
-                if isinstance(labels, dict) and 'metric_name' in labels:
-                    extracted_metric_name = labels['metric_name']
-                    logger.info(f"🔍 METRIC NAME - Extracted from labels: {extracted_metric_name}")
+                if extracted_metric_name == 'unknown_metric':
+                    labels = incident_data.get('labels', {})
+                    if isinstance(labels, dict) and labels.get('metric_name'):
+                        extracted_metric_name = labels['metric_name']
+                        logger.info(f"🔍 METRIC NAME - Found in labels: {extracted_metric_name}")
                 
-                # Try extracting from metadata
-                metadata = incident_data.get('metadata', {})
-                if isinstance(metadata, dict) and 'metric_name' in metadata:
-                    extracted_metric_name = metadata['metric_name']
-                    logger.info(f"🔍 METRIC NAME - Extracted from metadata: {extracted_metric_name}")
+                # Try extracting from message content
+                if extracted_metric_name == 'unknown_metric':
+                    message = incident_data.get('message', '')
+                    if 'metric_name=' in message:
+                        import re
+                        match = re.search(r'metric_name=([^\s]+)', message)
+                        if match:
+                            extracted_metric_name = match.group(1)
+                            logger.info(f"🔍 METRIC NAME - Extracted from message: {extracted_metric_name}")
+                
+                # Try inferring from anomaly type or detector name
+                if extracted_metric_name == 'unknown_metric':
+                    anomaly_type = incident_data.get('anomaly_type', '')
+                    detector_name = incident_data.get('detector_name', '')
+                    
+                    if 'log' in anomaly_type.lower() or 'log' in detector_name.lower():
+                        extracted_metric_name = 'log_anomaly'
+                        logger.info(f"🔍 METRIC NAME - Inferred from anomaly type: {extracted_metric_name}")
+                    elif 'cpu' in message.lower():
+                        extracted_metric_name = 'cpu_usage'
+                        logger.info(f"🔍 METRIC NAME - Inferred from message (CPU): {extracted_metric_name}")
+                    elif 'memory' in message.lower():
+                        extracted_metric_name = 'memory_usage'
+                        logger.info(f"🔍 METRIC NAME - Inferred from message (Memory): {extracted_metric_name}")
+                    elif 'network' in detector_name.lower():
+                        extracted_metric_name = 'network_metric'
+                        logger.info(f"🔍 METRIC NAME - Inferred from detector (Network): {extracted_metric_name}")
+                    else:
+                        # Try to extract from the service name or context
+                        service = incident_data.get('service', 'unknown_service')
+                        if service != 'unknown_service':
+                            extracted_metric_name = f'{service}_metric'
+                            logger.info(f"🔍 METRIC NAME - Derived from service: {extracted_metric_name}")
             
             logger.info(f"🔍 FINAL METRIC NAME: {extracted_metric_name}")
             
