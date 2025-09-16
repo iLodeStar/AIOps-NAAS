@@ -210,6 +210,10 @@ class IncidentAPIService:
             metadata_json = json.dumps(incident_data.get('metadata', {}))
             
             # CRITICAL FIX: Extract and validate all fields properly
+            # Enhanced metric value extraction and validation
+            original_metric_value = incident_data.get('metric_value', 0.0)
+            logger.info(f"🔍 METRIC VALUE - Original: {original_metric_value} (type: {type(original_metric_value)})")
+            
             metric_value = original_metric_value
             if not isinstance(metric_value, (int, float)):
                 try:
@@ -286,10 +290,6 @@ class IncidentAPIService:
                     logger.info(f"🔍 METRIC NAME - Extracted from metadata: {extracted_metric_name}")
             
             logger.info(f"🔍 FINAL METRIC NAME: {extracted_metric_name}")
-            
-            # Enhanced metric value extraction and validation
-            original_metric_value = incident_data.get('metric_value', 0.0)
-            logger.info(f"🔍 METRIC VALUE - Original: {original_metric_value} (type: {type(original_metric_value)})")
             
             # Insert incident into ClickHouse
             query = """
