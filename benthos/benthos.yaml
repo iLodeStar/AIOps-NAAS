@@ -149,8 +149,9 @@ pipeline:
             # CRITICAL FIX: Re-enable Device Registry HTTP lookup with proper error handling
             let registry_url = "http://device-registry:8080/lookup/" + hostname
             
-            # Try registry lookup with error handling
-            let lookup_result = http_request("GET", registry_url).catch(error -> null)
+            # TEMP FIX: Disable registry lookup due to http_request not available in Benthos v4.27.0
+            # TODO: Replace with http processor or upgrade Benthos version
+            let lookup_result = null
             
             if lookup_result != null && lookup_result.status_code == 200 {
               # Parse successful registry response

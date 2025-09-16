@@ -37,11 +37,9 @@
         let registry_url = "http://device-registry:8080/lookup/" + hostname
         let registry_response = null
         
-        # Try registry lookup with error handling
-        let lookup_result = http_request("GET", registry_url).catch(error -> {
-          # Registry lookup failed, use fallback logic
-          null
-        })
+        # TEMP FIX: Disable registry lookup due to http_request not available in Benthos v4.27.0
+        # TODO: Replace with http processor or upgrade Benthos version
+        let lookup_result = null
         
         if lookup_result != null && lookup_result.status_code == 200 {
           # Parse successful registry response
@@ -98,11 +96,9 @@
     if this.host != null && this.host != "" && this.host != "unknown" && this.registry_lookup_success == true {
       let update_url = "http://device-registry:8080/lookup/" + this.host + "/update-last-seen"
       
-      # Attempt to update last_seen timestamp
-      let update_result = http_request("POST", update_url).catch(error -> {
-        # Update failed, log but don't block processing
-        null
-      })
+      # TEMP FIX: Disable registry update due to http_request not available in Benthos v4.27.0
+      # TODO: Replace with http processor or upgrade Benthos version  
+      let update_result = null
       
       if update_result != null && update_result.status_code == 200 {
         root.registry_update_success = true
