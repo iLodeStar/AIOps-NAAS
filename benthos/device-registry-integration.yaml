@@ -2,6 +2,7 @@
 # This processor performs hostname → ship_id lookups using the Device Registry service
 # Add this to your Benthos pipeline before other processing steps
 
+# Step 1: Prepare for device registry lookup
 - mapping: |
     # Enhanced ship_id resolution using Device Registry service
     root.original_ship_id = this.ship_id
@@ -14,6 +15,7 @@
       # Valid ship_id already exists, keep it
       root.ship_id = this.ship_id
       root.ship_id_source = "original_field"
+      root.skip_lookup = true
     } else {
       # Need to resolve ship_id via registry lookup
       root.registry_lookup_attempted = true
@@ -29,45 +31,63 @@
         null
       }
       
-      if hostname != null {
-        # CRITICAL FIX: Re-enable Device Registry HTTP lookup with proper error handling
-        root.registry_lookup_attempted = true
-        
-        # Attempt HTTP lookup to Device Registry service
-        let registry_url = "http://device-registry:8080/lookup/" + hostname
-        let registry_response = null
-        
-        # TEMP FIX: Disable registry lookup due to http_request not available in Benthos v4.27.0
-        # TODO: Replace with http processor or upgrade Benthos version
-        let lookup_result = null
-        
-        if lookup_result != null && lookup_result.status_code == 200 {
-          # Parse successful registry response
-          let registry_data = lookup_result.body.parse_json().catch(error -> null)
-          if registry_data != null && registry_data.mapping != null && registry_data.mapping.ship_id != null {
-            root.ship_id = registry_data.mapping.ship_id
-            root.ship_id_source = "registry_lookup"
-            root.registry_lookup_success = true
-            root.device_id = registry_data.mapping.device_id
-            root.device_type = registry_data.mapping.device_type
-            root.ship_name = registry_data.mapping.ship_name
+      root.lookup_hostname = hostname
+      root.skip_lookup = hostname == null
+    }
+
+# Step 2: HTTP lookup using HTTP processor 
+- branch:
+    request_map: |
+      # Only process messages that need registry lookup
+      if this.skip_lookup != true && this.lookup_hostname != null {
+        root = this
+      } else {
+        root = deleted()
+      }
+    processors:
+      - http:
+          url: http://device-registry:8080/lookup/${! this.lookup_hostname }
+          verb: GET
+          retries: 0
+          timeout: 5s
+      - mapping: |
+          # Process HTTP response
+          root.registry_lookup_success = this.status_code == 200
+          if this.status_code == 200 {
+            root.registry_response = this.body.parse_json().catch(error -> null)
           } else {
-            # Registry response invalid, use fallback
-            root.ship_id = if hostname.contains("-") {
-              hostname.split("-").index(0) + "-ship"
-            } else {
-              hostname + "-ship"
-            }
-            root.ship_id_source = "registry_failed_hostname_fallback"
+            root.registry_response = null
           }
+    result_map: |
+      # Merge HTTP response back into original message
+      if this.skip_lookup != true {
+        root.registry_lookup_success = this.registry_lookup_success
+        root.registry_response = this.registry_response
+      }
+
+# Step 3: Process registry results and apply fallback logic
+- mapping: |
+    # Apply registry results or fallback logic
+    if this.skip_lookup != true {
+      if this.registry_lookup_success == true && this.registry_response != null && this.registry_response.mapping != null && this.registry_response.mapping.ship_id != null {
+        # Successful registry lookup
+        root.ship_id = this.registry_response.mapping.ship_id
+        root.ship_id_source = "registry_lookup"
+        root.registry_lookup_success = true
+        root.device_id = this.registry_response.mapping.device_id
+        root.device_type = this.registry_response.mapping.device_type
+        root.ship_name = this.registry_response.mapping.ship_name
+      } else if this.lookup_hostname != null {
+        # Registry failed or returned invalid data, use hostname fallback
+        root.ship_id = if this.lookup_hostname.contains("-") {
+          this.lookup_hostname.split("-").index(0) + "-ship"
         } else {
-          # Registry lookup failed or returned 404, use hostname-based fallback
-          root.ship_id = if hostname.contains("-") {
-            hostname.split("-").index(0) + "-ship"
-          } else {
-            hostname + "-ship"
-          }
-          root.ship_id_source = "registry_unavailable_hostname_fallback"
+          this.lookup_hostname + "-ship"
+        }
+        root.ship_id_source = if this.registry_lookup_success == true { 
+          "registry_failed_hostname_fallback" 
+        } else { 
+          "registry_unavailable_hostname_fallback" 
         }
       } else {
         # No hostname available, use ultimate fallback
@@ -86,33 +106,39 @@
       "timestamp": now()
     }
 
-# Registry update processor to update last_seen timestamp
-- mapping: |
-    # CRITICAL FIX: Re-enable registry last_seen updates with proper error handling
-    root.registry_update_success = false
-    root.registry_update_note = "attempting_update"
-    
-    # Only update if we have a valid hostname and successful registry lookup
-    if this.host != null && this.host != "" && this.host != "unknown" && this.registry_lookup_success == true {
-      let update_url = "http://device-registry:8080/lookup/" + this.host + "/update-last-seen"
-      
-      # TEMP FIX: Disable registry update due to http_request not available in Benthos v4.27.0
-      # TODO: Replace with http processor or upgrade Benthos version  
-      let update_result = null
-      
-      if update_result != null && update_result.status_code == 200 {
-        root.registry_update_success = true
-        root.registry_update_note = "last_seen_updated"
+# Step 4: Registry last_seen update (optional)
+- branch:
+    request_map: |
+      # Only update if we have valid hostname and successful registry lookup
+      if this.host != null && this.host != "" && this.host != "unknown" && this.registry_lookup_success == true {
+        root = this
       } else {
-        root.registry_update_success = false
-        root.registry_update_note = "update_failed_or_not_found"
+        root = deleted()
       }
-    } else {
-      root.registry_update_note = "no_valid_hostname_or_lookup_failed"
-    }
+    processors:
+      - http:
+          url: http://device-registry:8080/lookup/${! this.host }/update-last-seen
+          verb: POST
+          retries: 0
+          timeout: 5s
+      - mapping: |
+          # Process update response
+          root.registry_update_success = this.status_code == 200
+          root.registry_update_note = if this.status_code == 200 { 
+            "last_seen_updated" 
+          } else { 
+            "update_failed_or_not_found" 
+          }
+    result_map: |
+      # Merge update response back
+      root.registry_update_success = this.registry_update_success
+      root.registry_update_note = this.registry_update_note
 
-# Device type enrichment processor  
+# Step 5: Device type enrichment processor  
 - mapping: |
+    # Clean up temporary fields and finalize device type
+    root = this.without("skip_lookup", "lookup_hostname", "registry_response")
+    
     # Enhance device_type classification if not already set by registry
     if root.device_type == null || root.device_type == "" {
       root.device_type = if this.service != null {
