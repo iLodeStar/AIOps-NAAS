@@ -293,9 +293,9 @@ class OneClickIncidentDebugger:
             return 'unhealthy', 'Cannot check Docker containers', ['Verify Docker is running']
             
         credentials_to_try = [
-            ('admin', 'admin'),
-            ('default', 'clickhouse123'),
-            ('default', ''),
+            ('default', 'clickhouse123'),  # docker-compose.override.yml default
+            ('admin', 'admin'),            # docker-compose.yml fallback
+            ('default', ''),               # ClickHouse default
         ]
         
         errors = []
@@ -793,10 +793,10 @@ class OneClickIncidentDebugger:
         """Track data in ClickHouse"""
         try:
             # Query ClickHouse for our tracking ID
-            query = f"SELECT * FROM logs.incidents WHERE message LIKE '%{test_point.tracking_id}%' OR ship_id = '{test_point.ship_id}'"
+            query = f"SELECT * FROM logs.incidents WHERE metadata LIKE '%{test_point.tracking_id}%' OR ship_id = '{test_point.ship_id}'"
             
             # Try different credential combinations
-            credentials = [('admin', 'admin'), ('default', 'clickhouse123')]
+            credentials = [('default', 'clickhouse123'), ('admin', 'admin')]
             
             for user, password in credentials:
                 try:
@@ -804,7 +804,7 @@ class OneClickIncidentDebugger:
                            f'--user={user}']
                     if password:
                         cmd.append(f'--password={password}')
-                    cmd.extend([f'--query={query}'])
+                    cmd.extend([f'--query={query}', '--database=logs'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0:
@@ -855,7 +855,7 @@ class OneClickIncidentDebugger:
             # Query recent incidents
             query = "SELECT * FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 20"
             
-            credentials = [('admin', 'admin'), ('default', 'clickhouse123')]
+            credentials = [('default', 'clickhouse123'), ('admin', 'admin')]
             
             for user, password in credentials:
                 try:
@@ -863,7 +863,7 @@ class OneClickIncidentDebugger:
                            f'--user={user}']
                     if password:
                         cmd.append(f'--password={password}')
-                    cmd.extend([f'--query={query}'])
+                    cmd.extend([f'--query={query}', '--database=logs'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0:
@@ -929,9 +929,9 @@ class OneClickIncidentDebugger:
     def _identify_mismatches_for_test_point(self, test_point: TestDataPoint):
         """Identify mismatches for a specific test point"""
         try:
-            query = f"SELECT * FROM logs.incidents WHERE message LIKE '%{test_point.tracking_id}%' OR ship_id = '{test_point.ship_id}' ORDER BY processing_timestamp DESC LIMIT 1"
+            query = f"SELECT * FROM logs.incidents WHERE metadata LIKE '%{test_point.tracking_id}%' OR ship_id = '{test_point.ship_id}' ORDER BY processing_timestamp DESC LIMIT 1"
             
-            credentials = [('admin', 'admin'), ('default', 'clickhouse123')]
+            credentials = [('default', 'clickhouse123'), ('admin', 'admin')]
             
             for user, password in credentials:
                 try:
@@ -939,7 +939,7 @@ class OneClickIncidentDebugger:
                            f'--user={user}']
                     if password:
                         cmd.append(f'--password={password}')
-                    cmd.extend([f'--query={query}'])
+                    cmd.extend([f'--query={query}', '--database=logs'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                     
                     if result.returncode == 0 and result.stdout.strip():
@@ -979,9 +979,9 @@ class OneClickIncidentDebugger:
                 return
             
             # Query recent incidents to check for fallback values
-            query = "SELECT ship_id, service, metric_name, metric_value, message FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 100"
+            query = "SELECT ship_id, service, metric_name, metric_value, metadata FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 100"
             
-            credentials = [('admin', 'admin'), ('default', 'clickhouse123'), ('default', '')]
+            credentials = [('default', 'clickhouse123'), ('admin', 'admin'), ('default', '')]
             connection_errors = []
             
             for user, password in credentials:
@@ -990,7 +990,7 @@ class OneClickIncidentDebugger:
                            f'--user={user}']
                     if password:
                         cmd.append(f'--password={password}')
-                    cmd.extend([f'--query={query}', '--format=TabSeparated'])
+                    cmd.extend([f'--query={query}', '--format=TabSeparated', '--database=logs'])
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
                     
                     if result.returncode == 0:
@@ -1068,7 +1068,7 @@ class OneClickIncidentDebugger:
             fix_steps=[
                 'Verify ClickHouse container is running: docker ps | grep clickhouse',
                 'Check ClickHouse health: curl http://localhost:8123/ping',
-                'Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin',
+                'Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=default --password=clickhouse123 --database=logs',
                 'Check ClickHouse logs: docker logs aiops-clickhouse',
                 'Verify database initialization and table creation'
             ]
@@ -1452,8 +1452,8 @@ echo '<1>1 2024-01-01T00:00:00Z test-host systemd - - Test systemd message' | nc
 echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1515
 
 # Query current incidents
-docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin \\
-  --query="SELECT * FROM logs.incidents ORDER BY processing_timestamp DESC LIMIT 5"
+docker exec aiops-clickhouse clickhouse-client --user=default --password=clickhouse123 --database=logs \\
+  --query="SELECT * FROM incidents ORDER BY processing_timestamp DESC LIMIT 5"
 
 # Check NATS streams
 docker exec aiops-nats nats stream ls
@@ -1606,7 +1606,7 @@ To continue troubleshooting:
 
 3. Check ClickHouse:
    ```bash
-   docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin --query="SELECT 1"
+   docker exec aiops-clickhouse clickhouse-client --user=default --password=clickhouse123 --query="SELECT 1"
    ```
 
 **Error Details:** {error_message}
