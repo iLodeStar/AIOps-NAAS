@@ -578,11 +578,34 @@ pipeline:
           "debug": 1
         }
         
-        # CRITICAL FIX: Ensure severity values are never null with explicit defaults
-        let current_severity = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
-        let severity_priority = if severity_map.get(current_severity) != null { severity_map.get(current_severity) } else { 1 }
-        let related_severity = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
-        let related_priority = if severity_map.get(related_severity) != null { severity_map.get(related_severity) } else { if related != null { 1 } else { 0 } }
+        # CRITICAL FIX: Ensure severity values are never null with explicit defaults and ultra-safe .get() calls
+        let current_severity_raw = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
+        let current_severity = if current_severity_raw != null && current_severity_raw.type() == "string" { current_severity_raw } else { "info" }
+        let severity_priority = if current_severity == "critical" {
+          4
+        } else if current_severity == "high" {
+          3  
+        } else if current_severity == "medium" || current_severity == "warning" {
+          2
+        } else if current_severity == "info" || current_severity == "debug" {
+          1
+        } else {
+          1  # fallback for any unexpected values
+        }
+        
+        let related_severity_raw = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
+        let related_severity = if related_severity_raw != null && related_severity_raw.type() == "string" { related_severity_raw } else { "info" }
+        let related_priority = if related_severity == "critical" {
+          4
+        } else if related_severity == "high" {
+          3
+        } else if related_severity == "medium" || related_severity == "warning" {
+          2
+        } else if related_severity == "info" || related_severity == "debug" {
+          1
+        } else {
+          if related != null { 1 } else { 0 }
+        }
         
         # CRITICAL FIX: Calculate maximum priority safely with explicit null protection
         let max_priority = if severity_priority != null && related_priority != null {
