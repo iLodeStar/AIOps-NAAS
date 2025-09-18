@@ -1,7 +1,7 @@
 # Incident Data Pipeline Diagnostic Report
 
-**Generated:** 2025-09-13T13:30:00.270765  
-**Tracking Session:** `ONECLICK-20250913-132919-cf486cd0`  
+**Generated:** 2025-09-14T12:49:18.424083  
+**Tracking Session:** `ONECLICK-20250914-124818-e56948b1`  
 **Tool:** One-Click Incident Debugging  
 **System Syslog Support:** ✅ Enabled
 
@@ -14,7 +14,7 @@ Incident data pipeline is producing incomplete/fallback values instead of meanin
 This diagnostic includes comprehensive testing of system-generated syslog data:
 
 **Syslog Sources Tested:**
-- **systemd services** (facility 1, port 1514/1516)
+- **systemd services** (facility 1, port 1514/1515)
 - **SSH daemon (sshd)** (facility 1, standard system authentication)
 - **Kernel messages** (facility 0, hardware/system events)  
 - **Cron services** (facility 1, scheduled job logs)
@@ -22,7 +22,7 @@ This diagnostic includes comprehensive testing of system-generated syslog data:
 
 **Transport Methods:**
 - ✅ UDP Port 1514 (Vector syslog UDP source)
-- ✅ TCP Port 1516 (Vector syslog TCP source) 
+- ✅ TCP Port 1515 (Vector syslog TCP source) 
 - ⚠️ UDP Port 514 (Standard syslog - requires root)
 - ✅ Vector HTTP API (Fallback method)
 
@@ -30,43 +30,30 @@ This diagnostic includes comprehensive testing of system-generated syslog data:
 
 | Service | Status | Details |
 |---------|--------|---------|
-| Vector | ❌ unhealthy | Connection failed |
-| ClickHouse | ❌ unhealthy | Could not connect with any credentials |
-| NATS | ❌ unhealthy | Connection failed |
-| Benthos | ❌ unhealthy | Connection failed |
-| Victoria Metrics | ❌ unhealthy | Connection failed |
-| Incident API | ❌ unhealthy | Connection failed |
-| Device Registry | ❌ unhealthy | Connection failed |
+| Vector | ✅ healthy | HTTP 200 |
+| ClickHouse | ✅ healthy | Connected with admin/admin |
+| NATS | ✅ healthy | HTTP 200 |
+| Benthos | ✅ healthy | HTTP 200 |
+| Victoria Metrics | ✅ healthy | HTTP 200 |
+| Anomaly Detection | ✅ healthy | HTTP 200 |
+| Incident API | ✅ healthy | HTTP 200 |
+| Device Registry | ✅ healthy | HTTP 200 |
 
 ## ❌ Data Mismatches Identified
 
 
-### Ship Id Mismatch
+### Database Connectivity Mismatch
 
-- **Expected:** `actual ship identifiers (e.g., test-ship-alpha)`
-- **Actual:** `unknown-ship (predicted due to Device Registry being down)`
-- **Service Responsible:** Device Registry
-- **Root Cause:** Device Registry service is not running or not accessible
+- **Expected:** `accessible ClickHouse database with incident data`
+- **Actual:** `ClickHouse not accessible despite health checks passing`
+- **Service Responsible:** ClickHouse / Infrastructure
+- **Root Cause:** ClickHouse connectivity issues or credential problems
 - **Fix Steps:**
-  - Start the Device Registry service: docker-compose restart device-registry
-  - Check Device Registry health: curl http://localhost:8091/health
-  - Verify device registry database is accessible
-  - Ensure Benthos configuration includes device registry lookups
-  - Register test devices for validation
-
-
-### Incident Processing Mismatch
-
-- **Expected:** `incidents stored and queryable in ClickHouse`
-- **Actual:** `incidents may not be properly processed (predicted due to Incident API being down)`
-- **Service Responsible:** Incident API
-- **Root Cause:** Incident API service is not running or not accessible
-- **Fix Steps:**
-  - Start the Incident API service: docker-compose restart incident-api
-  - Check Incident API health: curl http://localhost:9081/health
-  - Verify NATS connectivity for incident events
-  - Check ClickHouse connectivity from Incident API
-  - Verify incident processing workflow
+  - Verify ClickHouse container is running: docker ps | grep clickhouse
+  - Check ClickHouse health: curl http://localhost:8123/ping
+  - Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin
+  - Check ClickHouse logs: docker logs aiops-clickhouse
+  - Verify database initialization and table creation
 
 
 ## 🧪 Test Data Generated
@@ -74,7 +61,7 @@ This diagnostic includes comprehensive testing of system-generated syslog data:
 The following test data was generated and traced through the pipeline:
 
 
-**Test Point 1:** `ONECLICK-20250913-132919-cf486cd0-DATA-001` (📱 Application)
+**Test Point 1:** `ONECLICK-20250914-124818-e56948b1-DATA-001` (📱 Application)
 - Ship: test-ship-alpha
 - Hostname: alpha-bridge-01  
 - Service: navigation_system
@@ -82,7 +69,7 @@ The following test data was generated and traced through the pipeline:
 - Metric: gps_accuracy_meters = 2.5
 
 
-**Test Point 2:** `ONECLICK-20250913-132919-cf486cd0-DATA-002` (🖥️ System)
+**Test Point 2:** `ONECLICK-20250914-124818-e56948b1-DATA-002` (🖥️ System)
 - Ship: test-ship-beta
 - Hostname: beta-engine-02  
 - Service: systemd
@@ -90,7 +77,7 @@ The following test data was generated and traced through the pipeline:
 - Metric: service_restart_count = 3.0
 
 
-**Test Point 3:** `ONECLICK-20250913-132919-cf486cd0-DATA-003` (🖥️ System)
+**Test Point 3:** `ONECLICK-20250914-124818-e56948b1-DATA-003` (🖥️ System)
 - Ship: test-ship-gamma
 - Hostname: gamma-comms-01  
 - Service: sshd
@@ -98,7 +85,7 @@ The following test data was generated and traced through the pipeline:
 - Metric: failed_login_attempts = 5.0
 
 
-**Test Point 4:** `ONECLICK-20250913-132919-cf486cd0-DATA-004` (🖥️ System)
+**Test Point 4:** `ONECLICK-20250914-124818-e56948b1-DATA-004` (🖥️ System)
 - Ship: test-ship-delta
 - Hostname: delta-sensor-03  
 - Service: kernel
@@ -106,7 +93,7 @@ The following test data was generated and traced through the pipeline:
 - Metric: temperature_celsius = 75.5
 
 
-**Test Point 5:** `ONECLICK-20250913-132919-cf486cd0-DATA-005` (🖥️ System)
+**Test Point 5:** `ONECLICK-20250914-124818-e56948b1-DATA-005` (🖥️ System)
 - Ship: test-ship-epsilon
 - Hostname: epsilon-backup-01  
 - Service: cron
@@ -116,31 +103,31 @@ The following test data was generated and traced through the pipeline:
 
 ## 🔬 Detailed Reproduction Steps
 
-**Test Case 1: ONECLICK-20250913-132919-cf486cd0-DATA-001**
+**Test Case 1: ONECLICK-20250914-124818-e56948b1-DATA-001**
 
 **Test Data:**
 - Ship ID: `test-ship-alpha`
 - Hostname: `alpha-bridge-01`
 - Service: `navigation_system`
 - Metric: `gps_accuracy_meters = 2.5`
-- Tracking ID: `ONECLICK-20250913-132919-cf486cd0-DATA-001`
+- Tracking ID: `ONECLICK-20250914-124818-e56948b1-DATA-001`
 
 **Reproduction Steps:**
 1. Start all services: `docker-compose up -d`
 2. Register device mapping:
    ```bash
-   curl -X POST http://localhost:8091/devices \
+   curl -X POST http://localhost:8081/devices/register \
      -H 'Content-Type: application/json' \
-     -d '{"hostname":"alpha-bridge-01","ship_id":"test-ship-alpha"}'
+     -d '{"hostname":"alpha-bridge-01","ip_address":"192.168.1.100","ship_id":"test-ship-alpha"}'
    ```
 3. Send syslog message (application syslog):
    ```bash
-   # Method 1: Vector UDP 1514/TCP 1516 (application)
-   echo '<134>1 2025-09-13T13:29:19.893062Z alpha-bridge-01 navigation_system - - [ONECLICK-20250913-132919-cf486cd0-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc -u localhost 1514
+   # Method 1: Vector UDP 1514/TCP 1515 (application)
+   echo '<134>1 2025-09-14T12:48:19.758710Z alpha-bridge-01 navigation_system - - [ONECLICK-20250914-124818-e56948b1-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc -u localhost 1514
    # Method 2: Vector TCP syslog
-   echo '<134>1 2025-09-13T13:29:19.893062Z alpha-bridge-01 navigation_system - - [ONECLICK-20250913-132919-cf486cd0-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc localhost 1516
+   echo '<134>1 2025-09-14T12:48:19.758710Z alpha-bridge-01 navigation_system - - [ONECLICK-20250914-124818-e56948b1-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc localhost 1515
    # Method 3: Standard syslog (if root)
-   echo '<134>1 2025-09-13T13:29:19.893062Z alpha-bridge-01 navigation_system - - [ONECLICK-20250913-132919-cf486cd0-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc -u localhost 514
+   echo '<134>1 2025-09-14T12:48:19.758710Z alpha-bridge-01 navigation_system - - [ONECLICK-20250914-124818-e56948b1-DATA-001] GPS accuracy degraded to 2.5 meters in heavy fog' | nc -u localhost 514
    ```
 4. Publish metric:
    ```bash
@@ -159,31 +146,31 @@ The following test data was generated and traced through the pipeline:
 - metric_name: `gps_accuracy_meters` (not 'unknown_metric')
 - metric_value: `2.5` (not 0)
 
-**Test Case 2: ONECLICK-20250913-132919-cf486cd0-DATA-002**
+**Test Case 2: ONECLICK-20250914-124818-e56948b1-DATA-002**
 
 **Test Data:**
 - Ship ID: `test-ship-beta`
 - Hostname: `beta-engine-02`
 - Service: `systemd`
 - Metric: `service_restart_count = 3.0`
-- Tracking ID: `ONECLICK-20250913-132919-cf486cd0-DATA-002`
+- Tracking ID: `ONECLICK-20250914-124818-e56948b1-DATA-002`
 
 **Reproduction Steps:**
 1. Start all services: `docker-compose up -d`
 2. Register device mapping:
    ```bash
-   curl -X POST http://localhost:8091/devices \
+   curl -X POST http://localhost:8081/devices/register \
      -H 'Content-Type: application/json' \
-     -d '{"hostname":"beta-engine-02","ship_id":"test-ship-beta"}'
+     -d '{"hostname":"beta-engine-02","ip_address":"192.168.1.100","ship_id":"test-ship-beta"}'
    ```
 3. Send syslog message (system syslog):
    ```bash
-   # Method 1: Vector UDP 1514/TCP 1516 (user facility)
-   echo '<14>1 2025-09-13T13:29:19.893085Z beta-engine-02 systemd - - [ONECLICK-20250913-132919-cf486cd0-DATA-002] Started engine monitoring service after 3 restart attempts' | nc -u localhost 1514
+   # Method 1: Vector UDP 1514/TCP 1515 (user facility)
+   echo '<14>1 2025-09-14T12:48:19.758758Z beta-engine-02 systemd - - [ONECLICK-20250914-124818-e56948b1-DATA-002] Started engine monitoring service after 3 restart attempts' | nc -u localhost 1514
    # Method 2: Vector TCP syslog
-   echo '<14>1 2025-09-13T13:29:19.893085Z beta-engine-02 systemd - - [ONECLICK-20250913-132919-cf486cd0-DATA-002] Started engine monitoring service after 3 restart attempts' | nc localhost 1516
+   echo '<14>1 2025-09-14T12:48:19.758758Z beta-engine-02 systemd - - [ONECLICK-20250914-124818-e56948b1-DATA-002] Started engine monitoring service after 3 restart attempts' | nc localhost 1515
    # Method 3: Standard syslog (if root)
-   echo '<14>1 2025-09-13T13:29:19.893085Z beta-engine-02 systemd - - [ONECLICK-20250913-132919-cf486cd0-DATA-002] Started engine monitoring service after 3 restart attempts' | nc -u localhost 514
+   echo '<14>1 2025-09-14T12:48:19.758758Z beta-engine-02 systemd - - [ONECLICK-20250914-124818-e56948b1-DATA-002] Started engine monitoring service after 3 restart attempts' | nc -u localhost 514
    ```
 4. Publish metric:
    ```bash
@@ -202,31 +189,31 @@ The following test data was generated and traced through the pipeline:
 - metric_name: `service_restart_count` (not 'unknown_metric')
 - metric_value: `3.0` (not 0)
 
-**Test Case 3: ONECLICK-20250913-132919-cf486cd0-DATA-003**
+**Test Case 3: ONECLICK-20250914-124818-e56948b1-DATA-003**
 
 **Test Data:**
 - Ship ID: `test-ship-gamma`
 - Hostname: `gamma-comms-01`
 - Service: `sshd`
 - Metric: `failed_login_attempts = 5.0`
-- Tracking ID: `ONECLICK-20250913-132919-cf486cd0-DATA-003`
+- Tracking ID: `ONECLICK-20250914-124818-e56948b1-DATA-003`
 
 **Reproduction Steps:**
 1. Start all services: `docker-compose up -d`
 2. Register device mapping:
    ```bash
-   curl -X POST http://localhost:8091/devices \
+   curl -X POST http://localhost:8081/devices/register \
      -H 'Content-Type: application/json' \
-     -d '{"hostname":"gamma-comms-01","ship_id":"test-ship-gamma"}'
+     -d '{"hostname":"gamma-comms-01","ip_address":"192.168.1.100","ship_id":"test-ship-gamma"}'
    ```
 3. Send syslog message (system syslog):
    ```bash
-   # Method 1: Vector UDP 1514/TCP 1516 (user facility)
-   echo '<14>1 2025-09-13T13:29:19.893105Z gamma-comms-01 sshd - - [ONECLICK-20250913-132919-cf486cd0-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc -u localhost 1514
+   # Method 1: Vector UDP 1514/TCP 1515 (user facility)
+   echo '<14>1 2025-09-14T12:48:19.758786Z gamma-comms-01 sshd - - [ONECLICK-20250914-124818-e56948b1-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc -u localhost 1514
    # Method 2: Vector TCP syslog
-   echo '<14>1 2025-09-13T13:29:19.893105Z gamma-comms-01 sshd - - [ONECLICK-20250913-132919-cf486cd0-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc localhost 1516
+   echo '<14>1 2025-09-14T12:48:19.758786Z gamma-comms-01 sshd - - [ONECLICK-20250914-124818-e56948b1-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc localhost 1515
    # Method 3: Standard syslog (if root)
-   echo '<14>1 2025-09-13T13:29:19.893105Z gamma-comms-01 sshd - - [ONECLICK-20250913-132919-cf486cd0-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc -u localhost 514
+   echo '<14>1 2025-09-14T12:48:19.758786Z gamma-comms-01 sshd - - [ONECLICK-20250914-124818-e56948b1-DATA-003] Failed password for maintenance from 192.168.1.100 port 22 ssh2' | nc -u localhost 514
    ```
 4. Publish metric:
    ```bash
@@ -245,31 +232,31 @@ The following test data was generated and traced through the pipeline:
 - metric_name: `failed_login_attempts` (not 'unknown_metric')
 - metric_value: `5.0` (not 0)
 
-**Test Case 4: ONECLICK-20250913-132919-cf486cd0-DATA-004**
+**Test Case 4: ONECLICK-20250914-124818-e56948b1-DATA-004**
 
 **Test Data:**
 - Ship ID: `test-ship-delta`
 - Hostname: `delta-sensor-03`
 - Service: `kernel`
 - Metric: `temperature_celsius = 75.5`
-- Tracking ID: `ONECLICK-20250913-132919-cf486cd0-DATA-004`
+- Tracking ID: `ONECLICK-20250914-124818-e56948b1-DATA-004`
 
 **Reproduction Steps:**
 1. Start all services: `docker-compose up -d`
 2. Register device mapping:
    ```bash
-   curl -X POST http://localhost:8091/devices \
+   curl -X POST http://localhost:8081/devices/register \
      -H 'Content-Type: application/json' \
-     -d '{"hostname":"delta-sensor-03","ship_id":"test-ship-delta"}'
+     -d '{"hostname":"delta-sensor-03","ip_address":"192.168.1.100","ship_id":"test-ship-delta"}'
    ```
 3. Send syslog message (system syslog):
    ```bash
    # Method 1: Vector UDP 1514 (kernel facility)
-   echo '<6>1 2025-09-13T13:29:19.893121Z delta-sensor-03 kernel - - [ONECLICK-20250913-132919-cf486cd0-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc -u localhost 1514
+   echo '<6>1 2025-09-14T12:48:19.758809Z delta-sensor-03 kernel - - [ONECLICK-20250914-124818-e56948b1-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc -u localhost 1514
    # Method 2: Vector TCP syslog
-   echo '<6>1 2025-09-13T13:29:19.893121Z delta-sensor-03 kernel - - [ONECLICK-20250913-132919-cf486cd0-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc localhost 1516
+   echo '<6>1 2025-09-14T12:48:19.758809Z delta-sensor-03 kernel - - [ONECLICK-20250914-124818-e56948b1-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc localhost 1515
    # Method 3: Standard syslog (if root)
-   echo '<6>1 2025-09-13T13:29:19.893121Z delta-sensor-03 kernel - - [ONECLICK-20250913-132919-cf486cd0-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc -u localhost 514
+   echo '<6>1 2025-09-14T12:48:19.758809Z delta-sensor-03 kernel - - [ONECLICK-20250914-124818-e56948b1-DATA-004] Hardware temperature sensor reading 75.5°C on CPU thermal zone' | nc -u localhost 514
    ```
 4. Publish metric:
    ```bash
@@ -288,31 +275,31 @@ The following test data was generated and traced through the pipeline:
 - metric_name: `temperature_celsius` (not 'unknown_metric')
 - metric_value: `75.5` (not 0)
 
-**Test Case 5: ONECLICK-20250913-132919-cf486cd0-DATA-005**
+**Test Case 5: ONECLICK-20250914-124818-e56948b1-DATA-005**
 
 **Test Data:**
 - Ship ID: `test-ship-epsilon`
 - Hostname: `epsilon-backup-01`
 - Service: `cron`
 - Metric: `backup_duration_seconds = 1800.0`
-- Tracking ID: `ONECLICK-20250913-132919-cf486cd0-DATA-005`
+- Tracking ID: `ONECLICK-20250914-124818-e56948b1-DATA-005`
 
 **Reproduction Steps:**
 1. Start all services: `docker-compose up -d`
 2. Register device mapping:
    ```bash
-   curl -X POST http://localhost:8091/devices \
+   curl -X POST http://localhost:8081/devices/register \
      -H 'Content-Type: application/json' \
-     -d '{"hostname":"epsilon-backup-01","ship_id":"test-ship-epsilon"}'
+     -d '{"hostname":"epsilon-backup-01","ip_address":"192.168.1.100","ship_id":"test-ship-epsilon"}'
    ```
 3. Send syslog message (system syslog):
    ```bash
-   # Method 1: Vector UDP 1514/TCP 1516 (user facility)
-   echo '<14>1 2025-09-13T13:29:19.893135Z epsilon-backup-01 cron - - [ONECLICK-20250913-132919-cf486cd0-DATA-005] Daily backup job completed in 1800 seconds' | nc -u localhost 1514
+   # Method 1: Vector UDP 1514/TCP 1515 (user facility)
+   echo '<14>1 2025-09-14T12:48:19.758835Z epsilon-backup-01 cron - - [ONECLICK-20250914-124818-e56948b1-DATA-005] Daily backup job completed in 1800 seconds' | nc -u localhost 1514
    # Method 2: Vector TCP syslog
-   echo '<14>1 2025-09-13T13:29:19.893135Z epsilon-backup-01 cron - - [ONECLICK-20250913-132919-cf486cd0-DATA-005] Daily backup job completed in 1800 seconds' | nc localhost 1516
+   echo '<14>1 2025-09-14T12:48:19.758835Z epsilon-backup-01 cron - - [ONECLICK-20250914-124818-e56948b1-DATA-005] Daily backup job completed in 1800 seconds' | nc localhost 1515
    # Method 3: Standard syslog (if root)
-   echo '<14>1 2025-09-13T13:29:19.893135Z epsilon-backup-01 cron - - [ONECLICK-20250913-132919-cf486cd0-DATA-005] Daily backup job completed in 1800 seconds' | nc -u localhost 514
+   echo '<14>1 2025-09-14T12:48:19.758835Z epsilon-backup-01 cron - - [ONECLICK-20250914-124818-e56948b1-DATA-005] Daily backup job completed in 1800 seconds' | nc -u localhost 514
    ```
 4. Publish metric:
    ```bash
@@ -337,28 +324,16 @@ The following test data was generated and traced through the pipeline:
 Based on the analysis, here are the priority fixes:
 
 
-### Device Registry Fix
+### ClickHouse / Infrastructure Fix
 
-**Issue:** Device Registry service is not running or not accessible
-
-**Steps:**
-1. Start the Device Registry service: docker-compose restart device-registry
-1. Check Device Registry health: curl http://localhost:8091/health
-1. Verify device registry database is accessible
-1. Ensure Benthos configuration includes device registry lookups
-1. Register test devices for validation
-
-
-### Incident API Fix
-
-**Issue:** Incident API service is not running or not accessible
+**Issue:** ClickHouse connectivity issues or credential problems
 
 **Steps:**
-1. Start the Incident API service: docker-compose restart incident-api
-1. Check Incident API health: curl http://localhost:9081/health
-1. Verify NATS connectivity for incident events
-1. Check ClickHouse connectivity from Incident API
-1. Verify incident processing workflow
+1. Verify ClickHouse container is running: docker ps | grep clickhouse
+1. Check ClickHouse health: curl http://localhost:8123/ping
+1. Test ClickHouse credentials: docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin
+1. Check ClickHouse logs: docker logs aiops-clickhouse
+1. Verify database initialization and table creation
 
 
 ## 📈 Pipeline Tracing Results
@@ -389,11 +364,11 @@ curl http://localhost:4195/ping    # Benthos
 
 # Test system syslog connectivity
 nc -u localhost 1514 < /dev/null  # Vector UDP syslog
-nc localhost 1516 < /dev/null     # Vector TCP syslog
+nc localhost 1515 < /dev/null     # Vector TCP syslog
 
 # Send test system syslog messages
 echo '<1>1 2024-01-01T00:00:00Z test-host systemd - - Test systemd message' | nc -u localhost 1514
-echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1516
+echo '<9>1 2024-01-01T00:00:00Z test-host sshd - - Test SSH daemon message' | nc localhost 1515
 
 # Query current incidents
 docker exec aiops-clickhouse clickhouse-client --user=admin --password=admin \
@@ -409,11 +384,11 @@ curl http://localhost:8686/metrics | grep syslog
 ## 📝 Environment Information
 
 - **Diagnostic Tool Version:** One-Click v1.1 (System Syslog Support)
-- **Timestamp:** 2025-09-13T13:30:00.270829
-- **Total Services Checked:** 7
+- **Timestamp:** 2025-09-14T12:49:18.424708
+- **Total Services Checked:** 8
 - **Test Data Points:** 5 (includes system syslog scenarios)
-- **Mismatches Found:** 2
-- **Syslog Transport Methods:** UDP/TCP ports 514, 1514, 1516 + HTTP API
+- **Mismatches Found:** 1
+- **Syslog Transport Methods:** UDP/TCP ports 514, 1514, 1515 + HTTP API
 - **System Services Tested:** systemd, sshd, kernel, cron, applications
 
 ---
