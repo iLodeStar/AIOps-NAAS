@@ -159,14 +159,14 @@ class EnrichedAnomalyDetectionService:
             await self.nats_client.connect("nats://nats:4222")
             self.health_status["nats_connected"] = True
             
-            # Subscribe to enriched data for anomaly detection
+            # Subscribe to enriched anomaly events from benthos enrichment
             await self.nats_client.subscribe(
-                "enriched.for_anomaly_detection",
+                "anomaly.detected.enriched",
                 cb=self._handle_enriched_event,
                 queue="enhanced_anomaly_detection"
             )
             
-            logger.info("Connected to NATS and subscribed to enriched data stream")
+            logger.info("Connected to NATS and subscribed to enriched anomaly stream")
         except Exception as e:
             logger.error(f"Failed to connect to NATS: {e}")
             self.health_status["nats_connected"] = False
@@ -327,8 +327,8 @@ class EnrichedAnomalyDetectionService:
                 }
             }
             
-            # Publish to Level 2 correlation (existing Benthos correlation)
-            await self.nats_client.publish("anomaly.detected", json.dumps(enriched_anomaly).encode())
+            # Publish to Level 2 correlation (Benthos final correlation stage)
+            await self.nats_client.publish("anomaly.detected.enriched.final", json.dumps(enriched_anomaly).encode())
             
             self.health_status["anomalies_detected"] += 1
             
