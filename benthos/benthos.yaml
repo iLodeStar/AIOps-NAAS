@@ -254,6 +254,7 @@ pipeline:
     # Step 3: Process results and apply fallback logic
     - mapping: |
         # Apply registry results or fallback logic
+        root = this
         if this.skip_lookup != true {
           if this.registry_lookup_success == true && this.registry_response != null && this.registry_response.mapping != null && this.registry_response.mapping.ship_id != null {
             # Successful registry lookup
@@ -302,6 +303,7 @@ pipeline:
     # Continue with the rest of field normalization
     - mapping: |
         # Normalize host field for consistent processing
+        root = this
         root.host = if this.host != null && this.host != "" {
           this.host
         } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" {
@@ -370,6 +372,8 @@ pipeline:
         # Normalize severity with comprehensive mapping
         root.severity = if this.severity != null && this.severity != "" { 
           this.severity 
+        } else if this.benthos_processing != null && this.benthos_processing.severity != null && this.benthos_processing.severity != "" {
+          this.benthos_processing.severity
         } else if this.level != null {
           if this.level.lowercase() == "error" || this.level.lowercase() == "fatal" {
             "critical"
@@ -605,7 +609,7 @@ pipeline:
         root.incident_type = "single_anomaly"
         
         # Parse related event from cache (if available)
-        let related = if meta("cache_result") != null && meta("cache_result").type() == "string" {
+        root.related = if meta("cache_result") != null && meta("cache_result").type() == "string" {
           meta("cache_result").parse_json() 
         } else {
           null
@@ -624,21 +628,21 @@ pipeline:
             "operational_anomaly"
           }
           
-        } else if this.event_source == "application_logs" && related != null && related.event_source == "basic_metrics" {
+        } else if this.event_source == "application_logs" && root.related != null && root.related.event_source == "basic_metrics" {
           # Application errors correlated with system metrics
-          root.incident_type = if related.metric_name != null && (related.metric_name.contains("cpu") || related.metric_name.contains("memory")) {
+          root.incident_type = if root.related.metric_name != null && (root.related.metric_name.contains("cpu") || root.related.metric_name.contains("memory")) {
             "application_system_correlation"
           } else {
             "application_infrastructure_issue"
           }
           
-        } else if this.event_source == "basic_metrics" && related != null && related.event_source == "application_logs" {
+        } else if this.event_source == "basic_metrics" && root.related != null && root.related.event_source == "application_logs" {
           # System metrics correlated with application errors
           root.incident_type = "system_application_correlation"
           
-        } else if related != null && 
-          ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
-           (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
+        } else if root.related != null && 
+          ((this.metric_name == "cpu_usage" && root.related.metric_name == "memory_usage") ||
+           (this.metric_name == "memory_usage" && root.related.metric_name == "cpu_usage")) {
           # Traditional CPU/memory correlation
           root.incident_type = "resource_pressure"
           
@@ -648,11 +652,11 @@ pipeline:
         }
         
         # Build event list for correlation
-        let all_events = [this]
-        if related != null {
-          all_events = all_events.append(related)
+        root.all_events = [this]
+        if root.related != null {
+          root.all_events = root.all_events.append(root.related)
         }
-        root.correlated_events = all_events
+        root.correlated_events = root.all_events
         
         # Calculate severity priority with comprehensive null safety
         let severity_map = {
@@ -665,58 +669,64 @@ pipeline:
         }
         
         # CRITICAL FIX: Ensure severity values are never null with explicit defaults and ultra-safe .get() calls
-        let current_severity_raw = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
-        let current_severity = if current_severity_raw != null && current_severity_raw.type() == "string" { current_severity_raw } else { "info" }
-        let severity_priority = if current_severity == "critical" {
+        root.current_severity_raw = if this.severity != null && this.severity != "" && this.severity.type() == "string" { 
+          this.severity.lowercase() 
+        } else if this.benthos_processing != null && this.benthos_processing.severity != null && this.benthos_processing.severity != "" {
+          this.benthos_processing.severity
+        } else { 
+          "info" 
+        }
+        root.current_severity = if root.current_severity_raw != null && root.current_severity_raw.type() == "string" { root.current_severity_raw } else { "info" }
+        root.severity_priority = if root.current_severity == "critical" {
           4
-        } else if current_severity == "high" {
+        } else if root.current_severity == "high" {
           3  
-        } else if current_severity == "medium" || current_severity == "warning" {
+        } else if root.current_severity == "medium" || root.current_severity == "warning" {
           2
-        } else if current_severity == "info" || current_severity == "debug" {
+        } else if root.current_severity == "info" || root.current_severity == "debug" {
           1
         } else {
           1  # fallback for any unexpected values
         }
         
-        let related_severity_raw = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
-        let related_severity = if related_severity_raw != null && related_severity_raw.type() == "string" { related_severity_raw } else { "info" }
-        let related_priority = if related_severity == "critical" {
+        root.related_severity_raw = if root.related != null && root.related.severity != null && root.related.severity != "" && root.related.severity.type() == "string" { root.related.severity.lowercase() } else { "info" }
+        root.related_severity = if root.related_severity_raw != null && root.related_severity_raw.type() == "string" { root.related_severity_raw } else { "info" }
+        root.related_priority = if root.related_severity == "critical" {
           4
-        } else if related_severity == "high" {
+        } else if root.related_severity == "high" {
           3
-        } else if related_severity == "medium" || related_severity == "warning" {
+        } else if root.related_severity == "medium" || root.related_severity == "warning" {
           2
-        } else if related_severity == "info" || related_severity == "debug" {
+        } else if root.related_severity == "info" || root.related_severity == "debug" {
           1
         } else {
-          if related != null { 1 } else { 0 }
+          if root.related != null { 1 } else { 0 }
         }
         
         # CRITICAL FIX: Calculate maximum priority safely with explicit null protection
-        let max_priority = if severity_priority != null && related_priority != null {
-          if severity_priority >= related_priority { severity_priority } else { related_priority }
-        } else if severity_priority != null {
-          severity_priority
-        } else if related_priority != null {
-          related_priority
+        root.max_priority = if root.severity_priority != null && root.related_priority != null {
+          if root.severity_priority >= root.related_priority { root.severity_priority } else { root.related_priority }
+        } else if root.severity_priority != null {
+          root.severity_priority
+        } else if root.related_priority != null {
+          root.related_priority
         } else {
           1  # Ultimate fallback
         }
         
         # Set incident severity based on max priority
-        root.incident_severity = if max_priority == 4 {
+        root.incident_severity = if root.max_priority == 4 {
           "critical"
-        } else if max_priority == 3 {
+        } else if root.max_priority == 3 {
           "high"
-        } else if max_priority == 2 {
+        } else if root.max_priority == 2 {
           "medium"
         } else {
           "low"
         }
         
         # Calculate correlation confidence
-        root.correlation_confidence = if all_events!=null && all_events.length() > 1 {
+        root.correlation_confidence = if root.all_events!=null && root.all_events.length() > 1 {
           0.85  # High confidence with correlated events
         } else if this.is_enriched {
           0.75  # Medium confidence for enriched single events
@@ -726,14 +736,23 @@ pipeline:
         
         # Add debug information with guaranteed non-null values
         root.debug_priorities = {
-          "severity_priority": if severity_priority != null { severity_priority } else { 1 },
-          "related_priority": if related_priority != null { related_priority } else { 0 },
-          "severity_value": if current_severity != null { current_severity } else { "info" },
-          "related_exists": related != null,
-          "max_priority": if max_priority != null { max_priority } else { 1 },
-          "event_count": if all_events!=null {all_events.length()} else{"null"},
+          "severity_priority": if root.severity_priority != null { root.severity_priority } else { 1 },
+          "related_priority": if root.related_priority != null { root.related_priority } else { 0 },
+          "severity_value": if root.current_severity != null { root.current_severity } else { "info" },
+          "related_exists": root.related != null,
+          "max_priority": if root.max_priority != null { root.max_priority } else { 1 },
+          "event_count": if root.all_events!=null {root.all_events.length()} else{"null"},
           "original_severity": if this.severity != null { this.severity } else { "null" },
-          "related_severity": if related != null && related.severity != null { related.severity } else { "null" }
+          "related_severity": if root.related != null && root.related.severity != null { root.related.severity } else { "null" },
+          "aa_severity_priority": root.severity_priority,
+          "aa_related_priority": root.related_priority ,
+          "aa_severity_value": root.current_severity,
+          "aa_related_exists": root.related ,
+          "aa_max_priority": root.max_priority,
+          "aa_event_count": root.all_events,
+          "aa_original_severity": this.severity,
+          "aa_related_severity": root.related,
+          "current_severity_raw": root.current_severity_raw
         }
         
         # Ensure all required fields are never null
