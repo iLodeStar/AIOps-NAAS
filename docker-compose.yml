@@ -338,19 +338,50 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos - Stream processing for event correlation
-  benthos:
+  # Benthos Level 1 Enrichment - Sequential Anomaly Enrichment with AI/ML Context
+  # Responsibility: Add maritime, weather, registry, and operational context using LLM/Ollama
+  # Input: anomaly.detected → Output: anomaly.detected.enriched
+  benthos-enrichment:
     image: jeffail/benthos:latest
-    container_name: aiops-benthos
+    container_name: aiops-benthos-enrichment
     ports:
-      - "4195:4195"  # HTTP API
+      - "4196:4196"  # HTTP API
     volumes:
-      - ./benthos/benthos.yaml:/benthos.yaml:ro
+      - ./benthos/enrichment.yaml:/benthos.yaml:ro
     command: ["-c", "/benthos.yaml"]
     depends_on:
       nats:
         condition: service_healthy
-      victoria-metrics:
+      anomaly-detection:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4196/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # Benthos Correlation and Incident Formation - Final stage with LLM/Ollama integration
+  # Responsibility: Deduplication, suppression, correlation logic, and incident creation
+  # Input: anomaly.detected.enriched.final → Output: incidents.created
+  benthos-correlation:
+    image: jeffail/benthos:latest
+    container_name: aiops-benthos-correlation
+    ports:
+      - "4195:4195"  # HTTP API
+    volumes:
+      - ./benthos/correlation.yaml:/benthos.yaml:ro
+    command: ["-c", "/benthos.yaml"]
+    depends_on:
+      nats:
+        condition: service_healthy
+      enhanced-anomaly-detection:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
@@ -367,30 +398,7 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos Data Enrichment - Level 1 correlation for raw data enrichment
-  benthos-enrichment:
-    image: jeffail/benthos:latest
-    container_name: aiops-benthos-enrichment
-    ports:
-      - "4196:4196"  # HTTP API
-    volumes:
-      - ./benthos/data-enrichment.yaml:/benthos.yaml:ro
-    command: ["-c", "/benthos.yaml"]
-    depends_on:
-      nats:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4196/ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "3"
-        max-size: "10m"
+
 
   # Enhanced Anomaly Detection - Context-aware anomaly detection with enriched data
   enhanced-anomaly-detection:
@@ -465,6 +473,8 @@ services:
       clickhouse:
         condition: service_healthy
       nats:
+        condition: service_healthy
+      benthos-correlation:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
