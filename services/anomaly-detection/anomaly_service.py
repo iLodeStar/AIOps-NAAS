@@ -488,7 +488,7 @@ class AnomalyDetectionService:
         """Process individual anomalous log messages from Vector"""
         try:
             log_data = json.loads(msg.data.decode())
-            
+            print("TESTING THIS DATA",log_data)
             # Extract tracking information from message
             message = log_data.get('message', '')
             tracking_id = log_data.get('tracking_id')
@@ -497,14 +497,16 @@ class AnomalyDetectionService:
             
             # CRITICAL FIX: Only process ERROR, CRITICAL, WARNING logs - skip INFO/DEBUG
             if log_level in ['INFO', 'DEBUG', 'TRACE'] and anomaly_severity in ['info', 'low', 'debug']:
+                print("ENTERED THIS BLOCK WITH", log_data, log_level, anomaly_severity)
                 logger.debug(f"Skipping non-critical log: level={log_level}, severity={anomaly_severity}, tracking_id={tracking_id}")
                 return
             
             # CRITICAL FIX: Additional filtering for normal operational messages
             if self._is_normal_operational_message(message):
+                print("ENTERED THAT BLOCK WITH", log_data, log_level, anomaly_severity, message)
                 logger.debug(f"Skipping normal operational message: {message[:50]}...")
                 return
-            
+            print("ENTERED AFTER BLOCK WITH", log_data, log_level, anomaly_severity, message)
             # Log processing for tracking (only for actual anomalies)
             logger.info(f"Processing anomalous log: tracking_id={tracking_id}, level={log_level}, severity={anomaly_severity}, message='{message[:100]}...'")
             
