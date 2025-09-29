@@ -392,32 +392,7 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos Anomaly Enrichment - Sequential pipeline for anomaly enrichment
-  benthos-anomaly-enrichment:
-    image: jeffail/benthos:latest
-    container_name: aiops-benthos-anomaly-enrichment
-    ports:
-      - "4197:4197"  # HTTP API
-    volumes:
-      - ./benthos/anomaly-enrichment.yaml:/benthos.yaml:ro
-    command: ["-c", "/benthos.yaml"]
-    depends_on:
-      nats:
-        condition: service_healthy
-      anomaly-detection:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4197/ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "3"
-        max-size: "10m"
+
 
   # Enhanced Anomaly Detection - Context-aware anomaly detection with enriched data
   enhanced-anomaly-detection:
@@ -433,7 +408,7 @@ services:
     depends_on:
       nats:
         condition: service_healthy
-      benthos-anomaly-enrichment:
+      benthos-enrichment:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

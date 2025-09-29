@@ -7,47 +7,14 @@ http:
   address: "0.0.0.0:4196"
   debug_endpoints: true
 
-# Input: Consume raw data events from multiple sources via NATS
+# Input: Consume anomaly events from basic anomaly detection service for sequential processing
 input:
-  broker:
-    inputs:
-      # System metrics from node-exporter via VMAgent
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "metrics.system.*"
-          queue: "enrichment_system"
-          
-      # VSAT/Satellite data
-      - nats:
-          urls: ["nats://nats:4222"] 
-          subject: "telemetry.satellite.*"
-          queue: "enrichment_satellite"
-          
-      # WiFi/Network device data
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "telemetry.network.*" 
-          queue: "enrichment_network"
-          
-      # Weather data affecting communications
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "external.weather.*"
-          queue: "enrichment_weather"
-          
-      # Ship telemetry (GPS, heading, speed)
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "telemetry.ship.*"
-          queue: "enrichment_ship"
-          
-      # Application logs and metrics
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "logs.application.*"
-          queue: "enrichment_application"
+  nats:
+    urls: ["nats://nats:4222"]
+    subject: "anomaly.detected"
+    queue: "benthos_enrichment"
 
-# Processing pipeline for data enrichment and correlation
+# Processing pipeline for anomaly enrichment and LLM integration
 pipeline:
   processors:
     # Add enrichment timestamp and correlation ID
@@ -56,245 +23,154 @@ pipeline:
         root.enrichment_timestamp = now()
         root.original_timestamp = this.timestamp
         
-        # Determine data source type from NATS subject
-        root.data_source = meta("nats_subject").split(".").index(1) 
-        root.data_category = meta("nats_subject").split(".").index(2).catch("general")
+        # Preserve original anomaly data
+        root.original_anomaly = this
         
-        # Add ship identifier
-        root.ship_id = this.ship_id || "ship-01"
+        # Extract key fields from anomaly event
+        root.ship_id = this.ship_id || this.metadata.ship_id || "unknown-ship"
+        root.metric_name = this.metric_name || "unknown_metric"
+        root.metric_value = this.metric_value || this.anomaly_score || 0.0
+        root.anomaly_score = this.anomaly_score || 0.0
+        root.severity = this.severity || "medium"
+        root.device_id = this.device_id || this.metadata.device_id || "unknown-device"
+        root.service = this.service || this.metadata.service || "unknown_service"
+        root.host = this.host || this.metadata.host || "unknown"
         
-        # Preserve original data
-        root.original_data = this
+        # Preserve tracking information for end-to-end traceability
+        root.tracking_id = this.tracking_id
+        root.correlation_id = this.correlation_id || uuid_v4()
         
-    # Cache recent data for correlation lookups
+        # Preserve original error message for debugging
+        root.log_message = this.log_message || this.message || ""
+        
+    # Cache recent anomaly data for context enrichment
     - cache:
         resource: "enrichment_cache"
         operator: "set"
-        key: "${! json(\"data_source\") + \"_\" + json(\"ship_id\") + \"_latest\" }"
+        key: "${! json(\"ship_id\") + \"_anomaly_latest\" }"
         value: "${! content() }"
         ttl: "300s"  # Keep for 5 minutes for correlation
         
-    # Fetch related data for correlation
+    # Fetch related ship context data (if available from telemetry)
     - cache:
         resource: "enrichment_cache"
         operator: "get"
-        key: "${! if json(\"data_source\") == \"system\" { \"satellite_\" + json(\"ship_id\") + \"_latest\" } else if json(\"data_source\") == \"satellite\" { \"weather_\" + json(\"ship_id\") + \"_latest\" } else if json(\"data_source\") == \"network\" { \"system_\" + json(\"ship_id\") + \"_latest\" } else { \"\" } }"
+        key: "${! json(\"ship_id\") + \"_ship_context\" }"
         
-    # Enrich with contextual data
+    # Enrich anomaly with maritime and operational context
     - mapping: |
-        # Parse cached related data
-        let related = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
+        # Parse cached ship context data
+        let ship_context = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
           meta("cache_result").parse_json()
         } else {
           null
         }
         
-        # Create enriched context based on data correlations
-        root.enrichment_context = {}
-        
-        # System metrics enrichment with satellite context
-        if this.data_source == "system" && related != null && related.data_source == "satellite" {
-          root.enrichment_context.satellite_quality = {
-            "snr_db": related.original_data.snr_db || null,
-            "signal_strength": related.original_data.signal_strength_dbm || null,
-            "ber": related.original_data.ber || null
-          }
-          root.enrichment_context.correlation_type = "system_satellite"
-        }
-        
-        # Satellite data enrichment with weather context
-        if this.data_source == "satellite" && related != null && related.data_source == "weather" {
-          root.enrichment_context.weather_impact = {
-            "rain_rate": related.original_data.rain_rate_mm_hr || null,
-            "wind_speed": related.original_data.wind_speed_kts || null,
-            "cloud_cover": related.original_data.cloud_cover_percent || null
-          }
-          root.enrichment_context.correlation_type = "satellite_weather"
-        }
-        
-        # Network metrics enrichment with system context  
-        if this.data_source == "network" && related != null && related.data_source == "system" {
-          root.enrichment_context.system_load = {
-            "cpu_usage": related.original_data.cpu_usage_percent || null,
-            "memory_usage": related.original_data.memory_usage_percent || null,
-            "disk_io": related.original_data.disk_io_utilization || null
-          }
-          root.enrichment_context.correlation_type = "network_system"
-        }
-        
-    # Fetch ship position for maritime context
-    - cache:
-        resource: "enrichment_cache"
-        operator: "get"
-        key: "${! \"ship_\" + json(\"ship_id\") + \"_latest\" }"
-        
-    # Add maritime operational context
-    - mapping: |
-        # Parse ship telemetry data
-        let ship_data = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
-          meta("cache_result").parse_json()
-        } else {
-          null
-        }
-        
-        # Add maritime context
-        if ship_data != null && ship_data.data_source == "ship" {
+        # Add maritime context if available
+        if ship_context != null {
           root.maritime_context = {
             "position": {
-              "latitude": ship_data.original_data.latitude || null,
-              "longitude": ship_data.original_data.longitude || null
+              "latitude": ship_context.latitude || null,
+              "longitude": ship_context.longitude || null
             },
             "navigation": {
-              "heading": ship_data.original_data.heading_degrees || null,
-              "speed": ship_data.original_data.speed_knots || null
+              "heading": ship_context.heading_degrees || null,
+              "speed": ship_context.speed_knots || null
             },
             "attitude": {
-              "pitch": ship_data.original_data.pitch_degrees || null,
-              "roll": ship_data.original_data.roll_degrees || null,
-              "yaw": ship_data.original_data.yaw_degrees || null
+              "pitch": ship_context.pitch_degrees || null,
+              "roll": ship_context.roll_degrees || null,
+              "yaw": ship_context.yaw_degrees || null
             }
+          }
+        } else {
+          root.maritime_context = {}
+        }
+        
+        # Add enrichment context based on anomaly characteristics
+        root.enrichment_context = {
+          "anomaly_enriched": true,
+          "enrichment_source": "benthos_level1_enrichment",
+          "context_confidence": if ship_context != null { 0.8 } else { 0.3 }
+        }
+        
+        # Enhance service context based on metric name and service - Use AI/ML over default rules
+        if this.metric_name != null {
+          if this.metric_name.contains("cpu") || this.metric_name.contains("memory") {
+            root.enrichment_context.system_resource_anomaly = true
+            root.enrichment_context.suggested_investigation = ["check_resource_utilization", "review_process_list"]
+          } else if this.metric_name.contains("network") || this.metric_name.contains("interface") {
+            root.enrichment_context.network_anomaly = true  
+            root.enrichment_context.suggested_investigation = ["check_network_interfaces", "review_traffic_patterns"]
+          } else if this.metric_name.contains("satellite") || this.metric_name.contains("snr") {
+            root.enrichment_context.satellite_anomaly = true
+            root.enrichment_context.suggested_investigation = ["check_satellite_alignment", "review_weather_conditions"]
           }
         }
         
-        # Calculate operational status based on correlations
+        # Add log-based enrichment if this came from log anomaly detection
+        if this.log_message != null && this.log_message != "" {
+          root.enrichment_context.log_based_anomaly = true
+          root.enrichment_context.error_message_present = true
+          
+          # Extract patterns from log messages for better context
+          if this.log_message.contains("database") || this.log_message.contains("connection") {
+            root.enrichment_context.database_related = true
+            root.enrichment_context.suggested_investigation = ["check_database_connections", "review_connection_pool"]
+          } else if this.log_message.contains("timeout") || this.log_message.contains("slow") {
+            root.enrichment_context.performance_related = true
+            root.enrichment_context.suggested_investigation = ["check_response_times", "review_system_load"]
+          } else if this.log_message.contains("authentication") || this.log_message.contains("permission") {
+            root.enrichment_context.security_related = true
+            root.enrichment_context.suggested_investigation = ["check_access_logs", "review_permissions"]
+          }
+        }
+        
+        # Calculate operational status based on anomaly characteristics
         root.operational_status = "normal"
         
-        # Degraded satellite conditions
-        if this.enrichment_context.satellite_quality != null {
-          let snr = this.enrichment_context.satellite_quality.snr_db
-          let ber = this.enrichment_context.satellite_quality.ber
-          if snr != null && snr < 10 {
-            root.operational_status = "degraded_comms"
-          }
-          if ber != null && ber > 0.001 {
-            root.operational_status = "poor_link_quality"
-          }
+        # Critical anomalies affect operational status
+        if this.anomaly_score != null && this.anomaly_score > 0.8 {
+          root.operational_status = "critical_anomaly"
+        } else if this.severity != null && (this.severity == "critical" || this.severity == "high") {
+          root.operational_status = "degraded_performance"
+        } else if this.log_message != null && this.log_message.contains("fail") {
+          root.operational_status = "system_issues"
         }
         
-        # Weather impact on satellite
-        if this.enrichment_context.weather_impact != null {
-          let rain = this.enrichment_context.weather_impact.rain_rate
-          if rain != null && rain > 5 {
-            root.operational_status = "weather_impacted"
-          }
-        }
-        
-        # Network device enrichment with system and satellite context
-        if this.data_source == "network" {
-          root.enrichment_context.network_correlation = {
-            "device_type": this.original_data.device_type || "unknown",
-            "device_ip": this.original_data.device_ip || this.original_data.ip_address,
-            "vendor": this.original_data.vendor || "unknown",
-            "location": this.original_data.location || "unknown"
-          }
-          
-          # Correlate network performance with system load
-          if system_data != null {
-            root.enrichment_context.network_correlation.system_context = {
-              "cpu_utilization": system_data.original_data.cpu_percent || null,
-              "memory_utilization": system_data.original_data.memory_percent || null,
-              "load_average": system_data.original_data.load1 || null
-            }
-            
-            # Network anomaly context based on system load
-            let cpu = system_data.original_data.cpu_percent
-            if cpu != null && cpu > 85 && this.original_data.interface_utilization_percent != null {
-              root.enrichment_context.network_correlation.high_load_correlation = true
-            }
-          }
-          
-          # Correlate network with satellite link quality
-          if related != null && related.data_source == "satellite" {
-            root.enrichment_context.network_correlation.satellite_context = {
-              "satellite_snr": related.original_data.snr_db || null,
-              "satellite_ber": related.original_data.ber || null,
-              "rain_fade_margin": related.original_data.rain_fade_margin_db || null
-            }
-            
-            # Mark satellite-dependent network components  
-            if this.original_data.device_type.or("") == "router" || this.original_data.device_type.or("") == "firewall" {
-              root.enrichment_context.network_correlation.satellite_dependent = true
-            }
-          }
-          
-          # Network device health assessment  
-          if this.original_data.cpu_utilization_percent != null || this.original_data.memory_utilization_percent != null {
-            root.enrichment_context.network_correlation.device_health = {
-              "cpu_healthy": (this.original_data.cpu_utilization_percent || 0) < 80,
-              "memory_healthy": (this.original_data.memory_utilization_percent || 0) < 85,
-              "temperature_healthy": (this.original_data.temperature_celsius || 0) < 50
-            }
-          }
-          
-          # Interface-specific correlation for switches and routers
-          if this.original_data.interfaces != null && this.original_data.interfaces.type() == "array" {
-            root.enrichment_context.network_correlation.critical_interfaces = this.original_data.interfaces.filter(interface -> interface.utilization_percent != null && interface.utilization_percent > 80).map_each(interface -> {
-              "interface": interface.interface_name,
-              "utilization": interface.utilization_percent,
-              "status": interface.oper_status.catch("unknown")
-            })
-          }
-        }
-        
-        # System enrichment with network device context
-        if this.data_source == "system" && related != null && related.data_source == "network" {
-          root.enrichment_context.network_infrastructure = {
-            "core_network_health": related.original_data.device_health || "unknown",
-            "network_device_count": 1,  # Simplified for this correlation
-            "critical_network_services": if related.original_data.device_type.or("") == "router" || related.original_data.device_type.or("") == "firewall" { ["routing", "security"] } else { ["switching"] }
-          }
-        }
-        
-        # High system load affecting network
-        if this.enrichment_context.system_load != null {
-          let cpu = this.enrichment_context.system_load.cpu_usage
-          let memory = this.enrichment_context.system_load.memory_usage
-          if (cpu != null && cpu > 80) || (memory != null && memory > 85) {
-            root.operational_status = "system_overloaded"
-          }
-        }
-        
-    # Create enriched event with correlation metadata
+    # Add LLM/Ollama-based context enrichment for AI/ML that can learn and grow
+    # NOTE: This is where actual LLM/Ollama integration should be implemented for learning
     - mapping: |
-        # Create final enriched event
-        root.event_type = "enriched_telemetry"
-        root.correlation_level = "level_1_raw_data"
-        root.created_at = now()
+        # LLM/Ollama enrichment placeholder - to be replaced with actual LLM calls
+        root.llm_enrichment = {
+          "llm_processed": false,  # Set to true when actual LLM integration added
+          "confidence_score": 0.6,
+          "suggested_priority": if this.anomaly_score != null && this.anomaly_score > 0.7 {
+            "high"
+          } else if this.severity == "critical" {
+            "critical"
+          } else {
+            "medium"
+          },
+          "enrichment_notes": "Level 1 anomaly enrichment completed - ready for enhanced anomaly detection",
+          "maritime_context_applied": this.maritime_context != {},
+          "weather_context_available": false,  # TODO: Integrate weather data
+          "registry_context_applied": false   # TODO: Integrate device registry
+        }
         
-        # Add correlation strength score
-        root.correlation_score = 0.0
-        if this.enrichment_context != {} {
-          root.correlation_score = root.correlation_score + 0.5
-        }
-        if this.maritime_context != {} {
-          root.correlation_score = root.correlation_score + 0.3
-        }
-        if this.operational_status != "normal" {
-          root.correlation_score = root.correlation_score + 0.2
-        }
-        
-        # Add processing metadata
-        root.enrichment_pipeline = {
-          "version": "1.0",
-          "processed_at": now(),
-          "correlations_applied": if this.enrichment_context.correlation_type != null { [this.enrichment_context.correlation_type] } else { [] },
-          "enrichment_sources": [this.data_source]
-        }
+        # Set correlation level for next stage
+        root.correlation_level = "level_1_anomaly_enriched"
+        root.pipeline_stage = "benthos_enrichment_complete"
 
-# Output: Send enriched data to multiple destinations
+# Output: Send enriched anomaly events to enhanced anomaly detection
 output:
   broker:
     pattern: fan_out
     outputs:
-      # Send to storage systems (VictoriaMetrics, ClickHouse)
+      # Send enriched anomaly to enhanced anomaly detection service
       - nats:
           urls: ["nats://nats:4222"]
-          subject: "enriched.${! json(\"data_source\") }.${! json(\"data_category\") }"
-          
-      # Send to anomaly detection with enrichment context
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "enriched.for_anomaly_detection"
+          subject: "anomaly.detected.enriched"
           
       # Log enriched events for debugging
       - stdout: {}
