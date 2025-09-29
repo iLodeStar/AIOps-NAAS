@@ -1,217 +1,757 @@
-# Benthos configuration for AIOps NAAS Sequential Pipeline Correlation
-# This configuration implements incident formation and correlation ONLY from
-# anomaly.detected.enriched.final - the final stage of the sequential pipeline
+# Benthos configuration for AIOps NAAS Sequential Pipeline Final Correlation
+# This configuration implements the final stage of the sequential pipeline:
+# anomaly.detected.enriched.final → benthos-correlation → incidents.created
+# PRESERVES all existing logging and processing logic from main branch
 
 http:
   enabled: true
   address: "0.0.0.0:4195"
   debug_endpoints: true
 
-# Input: Consume ONLY fully processed anomalies from the sequential pipeline
+# Input: Consume ONLY fully processed anomalies from sequential pipeline for final correlation
 input:
   nats:
     urls: ["nats://nats:4222"]
     subject: "anomaly.detected.enriched.final"
     queue: "benthos_correlation"
 
-# Pipeline for sequential correlation and incident formation with LLM/Ollama integration
+# Pipeline for comprehensive event processing and cross-source correlation
 pipeline:
   processors:
-    # Input validation for fully enriched anomaly events from sequential pipeline
+    # CRITICAL FIX: Filter out INFO/DEBUG level events early to prevent incident creation
+    - switch:
+      - check: |
+          this.severity != null && (this.severity.lowercase() == "info" || this.severity.lowercase() == "debug" || this.severity.lowercase() == "trace") && (this.anomaly_score == null || this.anomaly_score < 0.7) ||
+          this.level != null && (this.level.lowercase() == "info" || this.level.lowercase() == "debug" || this.level.lowercase() == "trace") && (this.anomaly_score == null || this.anomaly_score < 0.7)
+        processors:
+          - mapping: "root = deleted()"  # Drop the event
+      
+      # Process all other events (ERROR, CRITICAL, WARNING, or high-score INFO)  
+      - processors:
+          - mapping: |
+              # Log what we're processing for debugging
+              root.benthos_processing = {
+                "filtered_in": true,
+                "severity": if this.severity != null { this.severity } else if this.level != null { this.level } else { "unknown" },
+                "anomaly_score": if this.anomaly_score != null { this.anomaly_score } else { 0.0 },
+                "processing_timestamp": now()
+              }
+    
+    # Input validation and standardization with comprehensive null handling
     - mapping: |
-        # Log enriched input for debugging purposes
+        # Log raw input for debugging purposes
         root.debug_input = {
           "raw_content": content(),
           "content_type": content().type(),
           "timestamp": now(),
-          "metadata": meta(),
-          "pipeline_stage": "benthos_correlation_input"
+          "metadata": meta()
         }
         
-        # Events are already structured and enriched from sequential pipeline
+        # Validate and standardize input format with null safety
         if content().type() == "string" {
-          root = content().parse_json()
+          # Try to parse as JSON first, fallback to plain text on failure
+          let is_json = content().length() > 0 && (content().slice(0, 1) == "{" || content().slice(0, 1) == "[")
+          root = if is_json {
+            # Attempt JSON parsing with error handling
+            if content().parse_json() != null {
+              content().parse_json()
+            } else {
+              # JSON parsing failed, treat as plain text
+              {
+                "message": content(),
+                "level": "INFO",
+                "timestamp": now(),
+                "source": "raw_text",
+                "host": "unknown"
+              }
+            }
+          } else {
+            # Not JSON format, treat as plain text log
+            {
+              "message": content(),
+              "level": "INFO",
+              "timestamp": now(),
+              "source": "raw_text",
+              "host": "unknown"
+            }
+          }
         } else if content().type() == "object" {
+          # Already an object, use as-is but ensure required fields
           root = this
         } else {
-          # Fallback for unexpected format
+          # Unknown format, wrap in standardized structure
           root = {
             "message": content().string(),
-            "level": "ERROR", 
+            "level": "INFO", 
             "timestamp": now(),
-            "source": "benthos_correlation_fallback",
-            "ship_id": "unknown-ship",
-            "error": "unexpected_input_format"
+            "source": "unknown_format",
+            "host": "unknown"
           }
         }
 
-    # Enhanced correlation processing for fully enriched anomaly events
+    # Core field normalization with defensive null handling
     - mapping: |
-        # Generate incident ID and correlation metadata
-        root.incident_id = "inc-" + uuid_v4()
+        # Generate correlation ID if missing
         root.correlation_id = if this.correlation_id != null && this.correlation_id != "" { 
           this.correlation_id 
         } else { 
           uuid_v4() 
         }
-        root.final_processing_timestamp = now()
-        root.pipeline_stage = "benthos_correlation_processing"
+        root.processing_timestamp = now()
 
-    # Preserve all enrichment data from previous stages and create incident
+    # CRITICAL FIX: Device Registry Integration - Enhanced ship_id resolution using HTTP processor
+    # Step 1: Prepare for HTTP lookup and check existing ship_id
     - mapping: |
-        # Ensure all enriched fields are preserved from sequential pipeline
-        root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else { "unknown-ship" }
-        root.ship_name = if this.ship_name != null && this.ship_name != "" { this.ship_name } else { 
+        # Enhanced ship_id resolution using Device Registry service
+        root.original_ship_id = this.ship_id
+        root.original_host = this.host
+        root.registry_lookup_attempted = false
+        root.registry_lookup_success = false
+        
+        # CRITICAL FIX: Check for ship_id in multiple locations including metadata
+        let available_ship_id = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") {
+          this.ship_id
+        } else if this.metadata != null && this.metadata.ship_id != null && this.metadata.ship_id != "" && !this.metadata.ship_id.contains("unknown") {
+          this.metadata.ship_id
+        } else {
+          null
+        }
+        
+        # CRITICAL DEBUG: Add detailed ship_id debug information
+        root.ship_id_debug = {
+          "original_ship_id": if this.ship_id != null { this.ship_id } else { "null" },
+          "metadata_exists": this.metadata != null,
+          "metadata_ship_id": if this.metadata != null && this.metadata.ship_id != null { this.metadata.ship_id } else { "null" },
+          "available_ship_id": if available_ship_id != null { available_ship_id } else { "null" },
+          "processing_timestamp": now()
+        }
+        
+        # First check if we already have a valid ship_id from any source
+        if available_ship_id != null {
+          # Valid ship_id already exists, keep it
+          root.ship_id = available_ship_id
+          root.ship_id_source = if this.ship_id != null && this.ship_id != "" && !this.ship_id.contains("unknown") { "original_field" } else { "metadata_field" }
+          root.skip_lookup = true
+        } else {
+          # Need to resolve ship_id via registry lookup
+          root.registry_lookup_attempted = true
+          
+          # Try hostname-based lookup via Device Registry
+          let hostname = if this.host != null && this.host != "" { 
+            this.host 
+          } else if this.labels != null && this.labels.instance != null { 
+            this.labels.instance 
+          } else if this.hostname != null && this.hostname != "" {
+            this.hostname
+          } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" {
+            this.metadata.source_host
+          } else {
+            null
+          }
+          
+          root.lookup_hostname = hostname
+          root.skip_lookup = hostname == null
+        }
+
+    # Step 2: Conditional HTTP lookup using HTTP processor
+    - branch:
+        request_map: |
+          # Only process messages that need registry lookup
+          if this.skip_lookup != true && this.lookup_hostname != null {
+            root = this
+          } else {
+            root = deleted()
+          }
+        processors:
+          - http:
+              url: http://device-registry:8080/lookup/${! this.lookup_hostname }
+              verb: GET
+              retries: 0
+              timeout: 5s
+          - mapping: |
+              # Process HTTP response
+              root.registry_lookup_success = this.status_code == 200
+              if this.status_code == 200 {
+                root.registry_response = this.body.parse_json().catch(error -> null)
+              } else {
+                root.registry_response = null
+              }
+        result_map: |
+          # Merge HTTP response back into original message
+          if this.skip_lookup != true {
+            root.registry_lookup_success = this.registry_lookup_success
+            root.registry_response = this.registry_response
+          }
+
+    # Step 3: Process results and apply fallback logic
+    - mapping: |
+        # Apply registry results or fallback logic
+        if this.skip_lookup != true {
+          if this.registry_lookup_success == true && this.registry_response != null && this.registry_response.mapping != null && this.registry_response.mapping.ship_id != null {
+            # Successful registry lookup
+            root.ship_id = this.registry_response.mapping.ship_id
+            root.ship_id_source = "registry_lookup"
+            root.registry_lookup_success = true
+            root.device_id = this.registry_response.mapping.device_id
+            root.device_type = this.registry_response.mapping.device_type
+            root.ship_name = this.registry_response.mapping.ship_name
+          } else if this.lookup_hostname != null {
+            # Registry failed or returned invalid data, use hostname fallback
+            root.ship_id = if this.lookup_hostname.contains("-") {
+              this.lookup_hostname.split("-").index(0) + "-ship"
+            } else {
+              this.lookup_hostname + "-ship"
+            }
+            root.ship_id_source = if this.registry_lookup_success == true { 
+              "registry_failed_hostname_fallback" 
+            } else { 
+              "registry_unavailable_hostname_fallback" 
+            }
+          } else {
+            # No hostname available, use ultimate fallback
+            root.ship_id = "unknown-ship"
+            root.ship_id_source = "no_hostname"
+          }
+        }
+        
+        # Add registry lookup metadata for debugging
+        root.registry_metadata = {
+          "lookup_attempted": root.registry_lookup_attempted,
+          "lookup_success": root.registry_lookup_success,
+          "ship_id_source": root.ship_id_source,
+          "original_host": root.original_host,
+          "resolved_ship_id": root.ship_id,
+          "timestamp": now()
+        }
+        
+        # Clean up temporary fields
+        root = this.without("skip_lookup", "lookup_hostname", "registry_response")
+
+    # Continue with the rest of field normalization
+    - mapping: |
+        # Normalize host field for consistent processing
+        root.host = if this.host != null && this.host != "" {
+          this.host
+        } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" {
+          this.metadata.source_host
+        } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" {
+          this.labels.instance
+        } else {
+          "unknown"
+        }
+        
+        # Use ship_name from registry if available, otherwise derive from ship_id
+        root.ship_name = if root.ship_name != null && root.ship_name != "" {
+          # Already set from registry lookup
+          root.ship_name
+        } else if root.ship_id != null && root.ship_id != "" {
           if root.ship_id == "unknown-ship" {
             "Unknown Ship"
           } else if root.ship_id.contains("-ship") && root.ship_id.length() > 5 {
-            root.ship_id.slice(0, root.ship_id.length() - 5).split("-").map_each(word -> word.uppercase()).join(" ")
+            # Remove "-ship" suffix and convert to proper case for display
+            if root.ship_id.slice(0, root.ship_id.length() - 5).contains("-") {
+              # Convert "msc-aurora" to "MSC AURORA"
+              root.ship_id.slice(0, root.ship_id.length() - 5).split("-").map_each(word -> word.uppercase()).join(" ")
+            } else {
+              # Convert "aurora" to "AURORA" for single words  
+              root.ship_id.slice(0, root.ship_id.length() - 5).uppercase()
+            }
           } else {
+            # For non-standard ship_id formats, capitalize first letter
             root.ship_id.capitalize()
           }
+        } else {
+          "Unknown Ship"
         }
         
-        # Preserve enrichment context and maritime context from Level 1 enrichment
+        # Normalize event source with fallbacks
+        root.event_source = if this.event_source != null && this.event_source != "" { 
+          this.event_source 
+        } else if this.source != null && this.source != "" { 
+          this.source 
+        } else if this.anomaly_type != null && this.anomaly_type == "log_pattern" {
+          "application_logs"
+        } else if this.detector_name != null && this.detector_name.contains("network") {
+          "snmp_network"
+        } else if this.correlation_level != null && this.correlation_level == "level_1_enriched" {
+          "enriched_metrics"
+        } else { 
+          "basic_metrics" 
+        }
+        
+        # Normalize metric name with contextual fallbacks
+        root.metric_name = if this.metric_name != null && this.metric_name != "" { 
+          this.metric_name 
+        } else if this.message != null && this.message.contains("CPU") { 
+          "cpu_usage" 
+        } else if this.message != null && (this.message.contains("memory") || this.message.contains("Memory")) { 
+          "memory_usage" 
+        } else if root.event_source == "application_logs" {
+          "log_anomaly"
+        } else if root.event_source == "snmp_network" {
+          "interface_utilization"
+        } else { 
+          "unknown_metric" 
+        }
+        
+        # Normalize severity with comprehensive mapping
+        root.severity = if this.severity != null && this.severity != "" { 
+          this.severity 
+        } else if this.level != null {
+          if this.level.lowercase() == "error" || this.level.lowercase() == "fatal" {
+            "critical"
+          } else if this.level.lowercase() == "warn" || this.level.lowercase() == "warning" {
+            "warning"  
+          } else if this.level.lowercase() == "info" || this.level.lowercase() == "information" {
+            "info"
+          } else if this.level.lowercase() == "debug" || this.level.lowercase() == "trace" {
+            "debug"
+          } else {
+            "info"
+          }
+        } else {
+          "info"
+        }
+        
+        # Normalize anomaly score
+        root.anomaly_score = if this.anomaly_score != null { 
+          this.anomaly_score 
+        } else if root.severity == "critical" {
+          0.9
+        } else if root.severity == "warning" {
+          0.6
+        } else {
+          0.4
+        }
+        
+        # Normalize service information with enhanced metadata extraction
+        root.service = if this.service != null && this.service != "" {
+          this.service
+        } else if this.metadata != null && this.metadata.service != null && this.metadata.service != "" {
+          this.metadata.service
+        } else if this.labels != null && this.labels.job != null && this.labels.job != "" {
+          this.labels.job
+        } else if this.application != null && this.application != "" {
+          this.application
+        } else {
+          "unknown_service"
+        }
+        
+        # CRITICAL FIX: Extract and preserve metric values from metadata
+        root.metric_value = if this.metric_value != null {
+          this.metric_value
+        } else if this.value != null {
+          this.value  
+        } else if this.metadata != null && this.metadata.metric_value != null {
+          this.metadata.metric_value
+        } else {
+          0.0
+        }
+        
+        # CRITICAL FIX: Extract device_id from registry data or multiple sources
+        root.device_id = if root.device_id != null && root.device_id != "" {
+          # Already set from registry lookup
+          root.device_id
+        } else if this.device_id != null && this.device_id != "" {
+          this.device_id
+        } else if this.metadata != null && this.metadata.device_id != null && this.metadata.device_id != "" {
+          this.metadata.device_id
+        } else if this.host != null && this.host != "" && this.host != "unknown" {
+          this.host
+        } else if this.labels != null && this.labels.instance != null && this.labels.instance != "" {
+          this.labels.instance
+        } else {
+          "unknown-device"
+        }
+        
+        # CRITICAL FIX: Extract device_type from registry data or fallback
+        root.device_type = if root.device_type != null && root.device_type != "" {
+          # Already set from registry lookup
+          root.device_type
+        } else if this.device_type != null && this.device_type != "" {
+          this.device_type
+        } else if this.service != null {
+          if this.service.contains("nginx") || this.service.contains("web") {
+            "server"
+          } else if this.service.contains("postgres") || this.service.contains("mysql") {
+            "server" 
+          } else if this.service.contains("network") || this.service.contains("snmp") {
+            "network"
+          } else {
+            "server"
+          }
+        } else if this.metric_name != null {
+          if this.metric_name.contains("cpu") || this.metric_name.contains("memory") {
+            "server"
+          } else if this.metric_name.contains("network") || this.metric_name.contains("interface") {
+            "network"
+          } else {
+            "unknown"
+          }
+        } else {
+          "unknown"
+        }
+        
+        # CRITICAL FIX: Extract tracking_id for traceability
+        root.tracking_id = if this.tracking_id != null && this.tracking_id != "" {
+          this.tracking_id
+        } else if this.metadata != null && this.metadata.tracking_id != null && this.metadata.tracking_id != "" {
+          this.metadata.tracking_id
+        } else if this.correlation_id != null && this.correlation_id != "" {
+          this.correlation_id
+        } else {
+          null
+        }
+        
+        # Safe incident type handling
+        root.incident_type = if this.incident_type != null && this.incident_type != "" {
+          this.incident_type
+        } else {
+          "single_anomaly"
+        }
+        
+        # Add processing metadata
+        root.input_metadata = {
+          "original_format": content().type(),
+          "standardized": true,
+          "validation_timestamp": now(),
+          "processing_stage": "normalization"
+        }
+
+    # Enhanced context enrichment
+    - mapping: |
+        # Identify if this is enriched data
+        root.is_enriched = this.correlation_level != null && this.correlation_level == "level_1_enriched"
+        
+        # Preserve enrichment context safely
         root.enrichment_context = if this.enrichment_context != null { this.enrichment_context } else { {} }
         root.maritime_context = if this.maritime_context != null { this.maritime_context } else { {} }
         root.operational_status = if this.operational_status != null { this.operational_status } else { "normal" }
-        root.llm_enrichment = if this.llm_enrichment != null { this.llm_enrichment } else { {} }
         
-        # Preserve all tracking information for traceability
-        root.tracking_id = this.tracking_id
-        root.log_message = this.log_message
+        # Add source-specific context
+        if root.event_source == "application_logs" {
+          root.app_context = {
+            "logger_name": if this.logger_name != null { this.logger_name } else { "" },
+            "trace_id": if this.trace_id != null { this.trace_id } else { "" },
+            "span_id": if this.span_id != null { this.span_id } else { "" },
+            "thread": if this.thread != null { this.thread } else { "" },
+            "application": if this.application != null { this.application } else { "" }
+          }
+        } else {
+          root.app_context = {}
+        }
         
-        # Core incident fields from enriched anomaly
-        root.metric_name = if this.metric_name != null { this.metric_name } else { "unknown_metric" }
-        root.metric_value = if this.metric_value != null { this.metric_value } else { 0.0 }
-        root.anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.5 }
-        root.severity = if this.severity != null { this.severity } else { "medium" }
-        root.device_id = if this.device_id != null { this.device_id } else { "unknown-device" }
-        root.service = if this.service != null { this.service } else { "unknown_service" }
-        root.host = if this.host != null { this.host } else { "unknown" }
-        
-        # Set incident properties based on enriched data
-        root.incident_type = "anomaly_based_incident"
-        root.incident_source = "sequential_pipeline"
-        root.is_enriched = true
-        
-    # Store enriched incident events in correlation cache for deduplication
+        if root.event_source == "snmp_network" {
+          root.network_context = {
+            "device_type": if this.labels != null && this.labels.device_type != null { this.labels.device_type } else { "" },
+            "device_ip": if this.host != null { this.host } else { "" },
+            "interface": if this.labels != null && this.labels.interface != null { this.labels.interface } else { "" },
+            "metric_name": root.metric_name
+          }
+        } else {
+          root.network_context = {}
+        }
+
+    # Store events in correlation cache with safe key generation
     - cache:
         resource: "correlation_cache"  
         operator: "set"
-        key: "${! json(\"ship_id\") + \"_incident_\" + json(\"metric_name\") + \"_\" + (timestamp_unix() / 300 | floor).string() }"
+        key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } }"
         value: "${! content() }"
-        ttl: "600s"  # 10 minute deduplication window
+        ttl: "600s"  # 10 minute correlation window
         
-    # Store by tracking ID for suppression logic
+    # Store by time window for temporal correlation
     - cache:
-        resource: "suppression_cache"
+        resource: "temporal_cache"
         operator: "set"
-        key: "${! if json(\"tracking_id\") != null { json(\"tracking_id\") } else { json(\"incident_id\") } }"
+        key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + (timestamp_unix() / 300 | floor).string() }"
         value: "${! content() }"
-        ttl: "3600s"  # 1 hour suppression window
+        ttl: "900s"  # 15 minute temporal correlation window
 
-    # Apply deduplication and suppression logic
+    # Correlation logic - only attempt correlation for specific scenarios
     - switch:
-      - check: json("anomaly_score") > 0.8 || json("severity") == "critical"
+      - check: json("metric_name") == "cpu_usage" || json("metric_name") == "memory_usage"
         processors:
-          # High priority incidents - always process
-          - mapping: |
-              root.suppression_status = "not_suppressed"
-              root.suppression_reason = "high_priority_incident"
+          # Look for related system metrics
+          - try:
+            - cache:
+                resource: "correlation_cache"
+                operator: "get"  
+                key: "${! if json(\"metric_name\") == \"cpu_usage\" { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_memory_usage\" } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"event_source\") != null { json(\"event_source\") } else { \"unknown\" } + \"_cpu_usage\" } }"
       
-      - check: json("operational_status") == "critical_anomaly"
+      - check: json("event_source") == "basic_metrics"
         processors:
-          # Critical operational status - always process
-          - mapping: |
-              root.suppression_status = "not_suppressed"
-              root.suppression_reason = "critical_operational_status"
-              
-      - processors:
-          # Apply suppression for lower priority incidents
-          - mapping: |
-              root.suppression_status = "suppressed"
-              root.suppression_reason = "low_priority_duplicate"
+          # Look for related application logs
+          - try:
+            - cache:
+                resource: "correlation_cache"
+                operator: "get"
+                key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_application_logs_log_anomaly\" }"
+                
+      - check: json("event_source") == "application_logs" 
+        processors:
+          # Look for related system metrics
+          - try:
+            - cache:
+                resource: "correlation_cache"
+                operator: "get"
+                key: "${! if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_basic_metrics_cpu_usage\" }"
 
-    # LLM/Ollama integration for incident correlation and context enhancement
+    # Create comprehensive correlated incidents with safe null handling
     - mapping: |
-        # Placeholder for LLM/Ollama integration - Use LLM for context enhancement
-        root.llm_correlation = {
-          "llm_processed": false,  # Set to true when actual LLM integration added
-          "correlation_confidence": if this.enrichment_context != {} && this.maritime_context != {} { 0.85 } else { 0.6 },
-          "suggested_runbooks": if this.enrichment_context.database_related == true {
-            ["investigate_database_connectivity", "check_connection_pool"]
-          } else if this.enrichment_context.network_anomaly == true {
-            ["check_network_interfaces", "review_traffic_patterns"] 
-          } else if this.enrichment_context.system_resource_anomaly == true {
-            ["check_resource_utilization", "review_process_list"]
-          } else {
-            ["general_anomaly_investigation"]
-          },
-          "incident_summary": if this.log_message != null && this.log_message != "" {
-            "Log-based incident: " + this.log_message.slice(0, 100)
-          } else {
-            "Anomaly detected in " + this.metric_name + " with score " + this.anomaly_score.string()
-          }
+        # Initialize incident classification
+        root.incident_type = "single_anomaly"
+        
+        # Parse related event from cache (if available)
+        let related = if meta("cache_result") != null && meta("cache_result").type() == "string" {
+          meta("cache_result").parse_json() 
+        } else {
+          null
         }
         
-        # Create incident timeline
-        root.timeline = [
-          {
-            "timestamp": this.original_timestamp || now(),
-            "event": "anomaly_detected",
-            "description": if this.log_message != null && this.log_message != "" {
-              "Original log message: " + this.log_message
-            } else {
-              "Anomaly detected in " + this.metric_name
-            },
-            "source": "anomaly_detection_service",
-            "metadata": {
-              "tracking_id": this.tracking_id,
-              "anomaly_score": this.anomaly_score
-            }
-          },
-          {
-            "timestamp": this.enrichment_timestamp || now(),
-            "event": "anomaly_enriched", 
-            "description": "Anomaly enriched with maritime and operational context",
-            "source": "benthos_enrichment",
-            "metadata": {
-              "enrichment_context": this.enrichment_context
-            }
-          },
-          {
-            "timestamp": now(),
-            "event": "incident_created",
-            "description": "Incident created from enriched anomaly",
-            "source": "benthos_correlation",
-            "metadata": {
-              "incident_id": this.incident_id,
-              "correlation_confidence": this.llm_correlation.correlation_confidence
-            }
+        # Enhanced incident classification logic
+        if this.is_enriched && this.operational_status != "normal" {
+          # Enhanced operational incidents
+          root.incident_type = if this.operational_status == "weather_impacted" {
+            "weather_degradation"
+          } else if this.operational_status == "system_overloaded" {
+            "system_overload"
+          } else if this.operational_status == "degraded_comms" {
+            "communication_issues"
+          } else {
+            "operational_anomaly"
           }
-        ]
-        
-        # Set final incident status
-        root.status = if this.suppression_status == "suppressed" { "suppressed" } else { "open" }
-        root.priority = if this.anomaly_score > 0.8 { "high" } else if this.severity == "critical" { "critical" } else { "medium" }
-        
-        # Add final correlation metadata
-        root.correlation_metadata = {
-          "pipeline_version": "sequential_v1",
-          "processing_stages": ["anomaly_detection", "benthos_enrichment", "enhanced_anomaly_detection", "benthos_correlation"],
-          "total_processing_time_ms": (timestamp_unix_milli() - (this.original_timestamp.ts_unix() * 1000)),
-          "enrichment_applied": true,
-          "llm_correlation_applied": false  # Will be true when LLM integration is added
+          
+        } else if this.event_source == "application_logs" && related != null && related.event_source == "basic_metrics" {
+          # Application errors correlated with system metrics
+          root.incident_type = if related.metric_name != null && (related.metric_name.contains("cpu") || related.metric_name.contains("memory")) {
+            "application_system_correlation"
+          } else {
+            "application_infrastructure_issue"
+          }
+          
+        } else if this.event_source == "basic_metrics" && related != null && related.event_source == "application_logs" {
+          # System metrics correlated with application errors
+          root.incident_type = "system_application_correlation"
+          
+        } else if related != null && 
+          ((this.metric_name == "cpu_usage" && related.metric_name == "memory_usage") ||
+           (this.metric_name == "memory_usage" && related.metric_name == "cpu_usage")) {
+          # Traditional CPU/memory correlation
+          root.incident_type = "resource_pressure"
+          
+        } else if this.is_enriched && this.enrichment_context != {} {
+          # Multi-source correlation for enriched data
+          root.incident_type = "enriched_anomaly"
         }
+        
+        # Build event list for correlation
+        let all_events = [this]
+        if related != null {
+          all_events = all_events.append(related)
+        }
+        root.correlated_events = all_events
+        
+        # Calculate severity priority with comprehensive null safety
+        let severity_map = {
+          "critical": 4,
+          "high": 3,
+          "medium": 2,
+          "warning": 2,
+          "info": 1,
+          "debug": 1
+        }
+        
+        # CRITICAL FIX: Ensure severity values are never null with explicit defaults and ultra-safe .get() calls
+        let current_severity_raw = if this.severity != null && this.severity != "" && this.severity.type() == "string" { this.severity.lowercase() } else { "info" }
+        let current_severity = if current_severity_raw != null && current_severity_raw.type() == "string" { current_severity_raw } else { "info" }
+        let severity_priority = if current_severity == "critical" {
+          4
+        } else if current_severity == "high" {
+          3  
+        } else if current_severity == "medium" || current_severity == "warning" {
+          2
+        } else if current_severity == "info" || current_severity == "debug" {
+          1
+        } else {
+          1  # fallback for any unexpected values
+        }
+        
+        let related_severity_raw = if related != null && related.severity != null && related.severity != "" && related.severity.type() == "string" { related.severity.lowercase() } else { "info" }
+        let related_severity = if related_severity_raw != null && related_severity_raw.type() == "string" { related_severity_raw } else { "info" }
+        let related_priority = if related_severity == "critical" {
+          4
+        } else if related_severity == "high" {
+          3
+        } else if related_severity == "medium" || related_severity == "warning" {
+          2
+        } else if related_severity == "info" || related_severity == "debug" {
+          1
+        } else {
+          if related != null { 1 } else { 0 }
+        }
+        
+        # CRITICAL FIX: Calculate maximum priority safely with explicit null protection
+        let max_priority = if severity_priority != null && related_priority != null {
+          if severity_priority >= related_priority { severity_priority } else { related_priority }
+        } else if severity_priority != null {
+          severity_priority
+        } else if related_priority != null {
+          related_priority
+        } else {
+          1  # Ultimate fallback
+        }
+        
+        # Set incident severity based on max priority
+        root.incident_severity = if max_priority == 4 {
+          "critical"
+        } else if max_priority == 3 {
+          "high"
+        } else if max_priority == 2 {
+          "medium"
+        } else {
+          "low"
+        }
+        
+        # Calculate correlation confidence
+        root.correlation_confidence = if all_events.length() > 1 {
+          0.85  # High confidence with correlated events
+        } else if this.is_enriched {
+          0.75  # Medium confidence for enriched single events
+        } else {
+          0.60  # Lower confidence for single basic events
+        }
+        
+        # Add debug information with guaranteed non-null values
+        root.debug_priorities = {
+          "severity_priority": if severity_priority != null { severity_priority } else { 1 },
+          "related_priority": if related_priority != null { related_priority } else { 0 },
+          "severity_value": if current_severity != null { current_severity } else { "info" },
+          "related_exists": related != null,
+          "max_priority": if max_priority != null { max_priority } else { 1 },
+          "event_count": all_events.length(),
+          "original_severity": if this.severity != null { this.severity } else { "null" },
+          "related_severity": if related != null && related.severity != null { related.severity } else { "null" }
+        }
+        
+        # Ensure all required fields are never null
+        root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else { "unknown-ship" }
+        root.incident_type = if this.incident_type != null && this.incident_type != "" { this.incident_type } else { "single_anomaly" }
 
-    # Filter out suppressed incidents
+    # CRITICAL FIX: Enhanced suppression check - prevent duplicate incidents with multiple keys
+    - try:
+        - cache:
+            resource: "suppression_cache"
+            operator: "get"
+            # More granular suppression key including metric_name and service
+            key: "${! if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_incident\" } + \"_\" + if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + if json(\"service\") != null { json(\"service\") } else { \"unknown\" } }"
+
+    # CRITICAL FIX: Additional suppression for tracking_id-based deduplication
+    - try:
+        - cache:
+            resource: "tracking_suppression_cache"
+            operator: "get"
+            key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+
+    # Only process if not suppressed by either check
     - switch:
-      - check: json("suppression_status") == "suppressed"
+      - check: (meta("cache_result") == null || meta("cache_result") == "") && (meta("tracking_suppression_cache") == null || meta("tracking_suppression_cache") == "")
         processors:
+          # CRITICAL FIX: More granular suppression with longer TTL for similar incidents
+          - cache:
+              resource: "suppression_cache"
+              operator: "set" 
+              key: "${! if json(\"incident_type\") != null { json(\"incident_type\") } else { \"unknown_incident\" } + \"_\" + if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + if json(\"service\") != null { json(\"service\") } else { \"unknown\" } }"
+              value: "${! json(\"incident_id\") }"  # Store the incident ID for reference
+              ttl: "900s"  # Suppress for 15 minutes (longer for better deduplication)
+              
+          # CRITICAL FIX: Tracking-based suppression
+          - cache:
+              resource: "tracking_suppression_cache"
+              operator: "set"
+              key: "${! if json(\"tracking_id\") != null && json(\"tracking_id\") != \"\" { json(\"tracking_id\") } else { if json(\"ship_id\") != null { json(\"ship_id\") } else { \"unknown-ship\" } + \"_\" + if json(\"metric_name\") != null { json(\"metric_name\") } else { \"unknown\" } + \"_\" + (json(\"processing_timestamp\") / 60 | floor).string() } }"
+              value: "${! json(\"incident_id\") }"
+              ttl: "1800s"  # Suppress for 30 minutes for tracking-based deduplication
+              
+          # Create final incident event with complete metadata
+          - mapping: |
+              # Core incident fields
+              root.event_type = "incident"
+              root.incident_id = uuid_v4()
+              root.created_at = now()
+              root.updated_at = now()
+              root.status = "open"
+              root.acknowledged = false
+              
+              # CRITICAL FIX: Ensure all required fields are populated from processed data
+              root.incident_type = if this.incident_type != null && this.incident_type != "" { this.incident_type } else { "single_anomaly" }
+              root.incident_severity = if this.incident_severity != null && this.incident_severity != "" { this.incident_severity } else { "medium" }
+              root.ship_id = if this.ship_id != null && this.ship_id != "" { this.ship_id } else { "unknown-ship" }
+              root.service = if this.service != null && this.service != "" { this.service } else { "unknown_service" }
+              root.metric_name = if this.metric_name != null && this.metric_name != "" { this.metric_name } else { "unknown_metric" }
+              root.metric_value = if this.metric_value != null { this.metric_value } else { 0.0 }
+              root.anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.5 }
+              root.device_id = if this.device_id != null && this.device_id != "" { this.device_id } else { "unknown-device" }
+              root.correlation_id = if this.correlation_id != null && this.correlation_id != "" { this.correlation_id } else { uuid_v4() }
+              
+              # CRITICAL FIX: Include tracking information for traceability
+              root.tracking_id = if this.tracking_id != null && this.tracking_id != "" { this.tracking_id } else { null }
+              
+              # CRITICAL FIX: Enhanced timeline with more context
+              root.timeline = [
+                {
+                  "timestamp": now(),
+                  "event": "incident_created",
+                  "description": "Incident created by anomaly correlation - " + root.incident_type + " on " + root.ship_id,
+                  "source": "benthos_correlation",
+                  "metadata": {
+                    "anomaly_score": root.anomaly_score,
+                    "metric_name": root.metric_name,
+                    "metric_value": root.metric_value,
+                    "tracking_id": root.tracking_id,
+                    "correlation_confidence": if this.correlation_confidence != null { this.correlation_confidence } else { 0.6 }
+                  }
+                }
+              ]
+              
+              # CRITICAL FIX: Enhanced metadata including all source data
+              root.metadata = {
+                "correlation_confidence": if this.correlation_confidence != null { this.correlation_confidence } else { 0.6 },
+                "event_source": if this.event_source != null { this.event_source } else { "unknown" },
+                "host": if this.host != null { this.host } else { "unknown" },
+                "original_timestamp": if this.timestamp != null { this.timestamp } else { now() },
+                "processing_metadata": if this.input_metadata != null { this.input_metadata } else { {} },
+                "correlated_events_count": if this.correlated_events != null { this.correlated_events.length() } else { 1 },
+                "ship_id_source": if this.ship_id_source != null { this.ship_id_source } else { "unknown" },
+                "registry_metadata": if this.registry_metadata != null { this.registry_metadata } else { {} }
+              }
+              
+              # Enhanced runbook suggestions based on incident type and context
+              root.suggested_runbooks = if this.incident_type == "resource_pressure" {
+                ["investigate_high_resource_usage", "scale_resources", "check_system_limits"]
+              } else if this.incident_type == "weather_degradation" {
+                ["weather_response_protocol", "switch_backup_comm", "adjust_satellite_parameters"]
+              } else if this.incident_type == "communication_issues" {
+                ["comm_system_diagnostics", "antenna_alignment_check", "backup_communication"]
+              } else if this.incident_type == "system_overload" {
+                ["load_balancing", "process_optimization", "resource_scaling"]
+              } else if this.incident_type == "application_system_correlation" {
+                ["investigate_app_system_correlation", "check_resource_limits", "review_application_logs"]
+              } else if this.metric_name == "cpu_usage" {
+                ["investigate_cpu_usage", "check_cpu_intensive_processes"]  
+              } else if this.metric_name == "memory_usage" {
+                ["investigate_memory_usage", "check_memory_leaks"]
+              } else if this.event_source == "application_logs" {
+                ["review_application_logs", "check_application_health", "investigate_error_patterns"]
+              } else {
+                ["generic_investigation", "check_system_health"]
+              }
+
+      # Drop suppressed events
+      - processors:
           - mapping: "root = deleted()"
 
-# Output: Send correlated incidents to incident management
+# Output: Send correlated incidents to multiple destinations
 output:
   broker:
     pattern: fan_out
@@ -221,33 +761,33 @@ output:
           urls: ["nats://nats:4222"]
           subject: "incidents.created"
           
-      # Log incidents for debugging
+      # Log to console for debugging  
       - stdout: {}
 
-# Cache resources for correlation and deduplication
+# Caching resources for correlation and suppression
 cache_resources:
-  - label: "correlation_cache"
+  - label: "correlation_cache" 
     memory:
       default_ttl: "600s"
-      compaction_interval: "60s"
+      
+  - label: "temporal_cache"
+    memory:
+      default_ttl: "900s"
       
   - label: "suppression_cache"
     memory:
-      default_ttl: "3600s"
-      compaction_interval: "300s"
+      default_ttl: "900s"  # Increased TTL for better deduplication
+      
+  # CRITICAL FIX: New cache for tracking-based suppression
+  - label: "tracking_suppression_cache"
+    memory:
+      default_ttl: "1800s"  # 30 minutes for tracking-based deduplication
 
 # Metrics and monitoring
 metrics:
   prometheus: {}
     
 logger:
-  level: INFO
+  level: TRACE
   format: json
   add_timestamp: true
-
-# Rate limiting to handle high-throughput data
-rate_limit_resources:
-  - label: "correlation_rate_limit"
-    local:
-      count: 1000
-      interval: "1s"

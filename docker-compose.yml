@@ -338,7 +338,7 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos - Stream processing for event correlation
+  # Benthos - Sequential Pipeline Final Correlation for incident creation
   benthos:
     image: jeffail/benthos:latest
     container_name: aiops-benthos
@@ -350,9 +350,7 @@ services:
     depends_on:
       nats:
         condition: service_healthy
-      victoria-metrics:
-        condition: service_healthy
-      clickhouse:
+      enhanced-anomaly-detection:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -367,7 +365,7 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos Data Enrichment - Level 1 correlation for raw data enrichment
+  # Benthos Data Enrichment - Sequential Anomaly Enrichment (Level 1)
   benthos-enrichment:
     image: jeffail/benthos:latest
     container_name: aiops-benthos-enrichment
@@ -378,6 +376,8 @@ services:
     command: ["-c", "/benthos.yaml"]
     depends_on:
       nats:
+        condition: service_healthy
+      anomaly-detection:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
