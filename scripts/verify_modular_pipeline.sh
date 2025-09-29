@@ -24,7 +24,7 @@ echo ""
 # Step 1: Verify all services are running
 echo -e "${BLUE}Step 1: Verifying Service Health${NC}"
 
-services=("vector:8686" "anomaly-detection:8080" "benthos-enrichment:4196" "enhanced-anomaly-detection:9082" "benthos:4195" "incident-api:8081")
+services=("vector:8686" "anomaly-detection:8080" "benthos-enrichment:4196" "benthos-anomaly-enrichment:4197" "enhanced-anomaly-detection:9082" "benthos:4195" "incident-api:8081")
 for service in "${services[@]}"; do
     name=${service%:*}
     port=${service#*:}

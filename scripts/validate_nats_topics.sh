@@ -14,13 +14,17 @@ expected_flow["Enhanced Anomaly Detection"]="anomaly.detected.enriched.final"
 expected_flow["Benthos Correlation"]="incidents.created"
 
 echo ""
-echo "📋 Expected Pipeline Flow:"
+echo "📋 Expected Sequential Anomaly Pipeline Flow:"
 echo "  Vector → logs.anomalous"
 echo "  Anomaly Detection Service → anomaly.detected" 
-echo "  Benthos Enrichment → anomaly.detected.enriched"
+echo "  Benthos Anomaly Enrichment → anomaly.detected.enriched"
 echo "  Enhanced Anomaly Detection → anomaly.detected.enriched.final"
 echo "  Benthos Correlation → incidents.created"
 echo "  Incident API (consumes incidents.created)"
+echo ""
+echo "📋 Existing Telemetry Pipeline (Preserved):"
+echo "  Raw Telemetry → Benthos Data Enrichment → enriched.for_anomaly_detection"
+echo "  Enhanced Anomaly Detection → anomaly.detected.enriched.final"
 echo ""
 
 # Check Vector configuration
@@ -40,11 +44,19 @@ else
 fi
 
 # Check Benthos Enrichment
-echo "🔍 Checking Benthos Enrichment Configuration..."
-if grep -q "subject.*anomaly\.detected" benthos/data-enrichment.yaml && grep -q "subject.*anomaly\.detected\.enriched" benthos/data-enrichment.yaml; then
-    echo "  ✅ Benthos Enrichment: subscribes to anomaly.detected, publishes to anomaly.detected.enriched"
+echo "🔍 Checking Benthos Data Enrichment Configuration..."
+if grep -q "subject.*metrics\.system" benthos/data-enrichment.yaml && grep -q "subject.*enriched\.for_anomaly_detection" benthos/data-enrichment.yaml; then
+    echo "  ✅ Benthos Data Enrichment: subscribes to raw telemetry, publishes to enriched.for_anomaly_detection"
 else
-    echo "  ❌ Benthos Enrichment: incorrect topic configuration"
+    echo "  ❌ Benthos Data Enrichment: incorrect topic configuration"
+fi
+
+# Check Benthos Anomaly Enrichment
+echo "🔍 Checking Benthos Anomaly Enrichment Configuration..."
+if grep -q "subject.*anomaly\.detected" benthos/anomaly-enrichment.yaml && grep -q "subject.*anomaly\.detected\.enriched" benthos/anomaly-enrichment.yaml; then
+    echo "  ✅ Benthos Anomaly Enrichment: subscribes to anomaly.detected, publishes to anomaly.detected.enriched"
+else
+    echo "  ❌ Benthos Anomaly Enrichment: incorrect topic configuration"
 fi
 
 # Check Enhanced Anomaly Detection

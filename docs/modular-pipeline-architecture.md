@@ -2,39 +2,54 @@
 
 ## Overview
 
-This document describes the refactored modular event processing pipeline that ensures sequential, non-overlapping processing stages with distinct NATS topics for each service handoff.
+This document describes the refactored modular event processing pipeline that implements sequential anomaly processing while preserving existing telemetry enrichment functionality. The system now supports both parallel telemetry processing and sequential anomaly processing.
 
 ## Architecture Diagram
 
 ```
-┌─────────────────┐    logs.anomalous    ┌─────────────────────┐
-│     Vector      │─────────────────────▶│   Anomaly Detection │
-│ (Log Ingestion) │                      │     Service         │
-└─────────────────┘                      └─────────────────────┘
-                                                   │
-                                                   │ anomaly.detected
-                                                   ▼
-┌─────────────────┐    anomaly.detected.enriched ┌─────────────────────┐
-│ Enhanced Anomaly│◀─────────────────────────────│    Benthos          │
-│   Detection     │                              │   Enrichment        │
-│  (Level 2)      │                              │  (Level 1)          │
-└─────────────────┘                              └─────────────────────┘
-         │
-         │ anomaly.detected.enriched.final
-         ▼
-┌─────────────────┐    incidents.created   ┌─────────────────────┐
-│    Benthos      │─────────────────────▶│   Incident API      │
-│  Correlation    │                      │    Service          │
-│ (Incident Form) │                      │                     │
-└─────────────────┘                      └─────────────────────┘
-                                                   │
-                                                   │ ClickHouse + REST API
-                                                   ▼
-                                         ┌─────────────────────┐
-                                         │   Storage &         │
-                                         │   Alerting          │
-                                         └─────────────────────┘
+                    ┌─────────────────┐    logs.anomalous    ┌─────────────────────┐
+                    │     Vector      │─────────────────────▶│   Anomaly Detection │
+                    │ (Log Ingestion) │                      │     Service         │
+                    └─────────────────┘                      └─────────────────────┘
+                                                                       │
+                                                                       │ anomaly.detected
+                                                                       ▼
+                    ┌─────────────────┐                      ┌─────────────────────┐
+   Raw Telemetry ──▶│    Benthos      │                      │     Benthos         │
+     Data            │   Enrichment    │                      │  Anomaly Enrichment │
+                    │ (Raw Data L1)   │                      │   (Anomaly L1)      │
+                    └─────────────────┘                      └─────────────────────┘
+                                                                       │
+                                                                       │ anomaly.detected.enriched
+                                                                       ▼
+                    ┌─────────────────┐  anomaly.detected.enriched.final ┌─────────────────────┐
+                    │    Benthos      │◀─────────────────────────────────│   Enhanced Anomaly  │
+                    │  Correlation    │                                  │   Detection         │
+                    │ (Incident Form) │                                  │  (Anomaly L2)       │
+                    └─────────────────┘                                  └─────────────────────┘
+                             │
+                             │ incidents.created
+                             ▼
+                    ┌─────────────────────┐
+                    │   Incident API      │
+                    │    Service          │
+                    └─────────────────────┘
 ```
+
+## Dual Processing Architecture
+
+### Existing Telemetry Processing (Preserved)
+- **Benthos Data Enrichment** (port 4196): Processes raw telemetry data from multiple sources
+- **Enhanced Anomaly Detection**: Processes enriched telemetry for context-aware anomaly detection
+- **Benthos Correlation**: Handles mixed event correlation
+
+### New Sequential Anomaly Processing (Added)
+- **Vector** → `logs.anomalous` 
+- **Anomaly Detection** → `anomaly.detected`
+- **Benthos Anomaly Enrichment** → `anomaly.detected.enriched` 
+- **Enhanced Anomaly Detection** → `anomaly.detected.enriched.final`
+- **Benthos Correlation** → `incidents.created`
+- **Incident API** → Storage & REST API
 
 ## Service Details
 
@@ -59,12 +74,22 @@ This document describes the refactored modular event processing pipeline that en
 - **Configuration**: `services/anomaly-detection/`
 - **Status**: ✅ Already correctly configured
 
-### 3. Benthos Enrichment Service (Level 1 Enrichment) 
-- **Input**: NATS `anomaly.detected` (ONLY)
+### 3a. Benthos Data Enrichment Service (Raw Telemetry Processing)
+- **Input**: Raw telemetry from multiple NATS topics (`metrics.system.*`, `telemetry.satellite.*`, etc.)
 - **Processing**: 
   - Maritime context enrichment
   - Weather data correlation
-  - Device registry lookups
+  - Cross-telemetry correlation
+- **Output**: NATS `enriched.for_anomaly_detection`
+- **Configuration**: `benthos/data-enrichment.yaml`
+- **Port**: 4196
+- **Status**: ✅ Preserved existing functionality
+
+### 3b. Benthos Anomaly Enrichment Service (Sequential Pipeline)
+- **Input**: NATS `anomaly.detected` (ONLY)
+- **Processing**: 
+  - Maritime context enrichment for anomalies
+  - Error pattern analysis
   - AI/ML context enhancement (placeholder)
   - Operational status determination
 - **Output**: NATS `anomaly.detected.enriched`
@@ -73,29 +98,30 @@ This document describes the refactored modular event processing pipeline that en
   - Adds enrichment_context with investigation suggestions
   - Sets operational_status based on anomaly characteristics
   - Maintains tracking IDs throughout
-- **Configuration**: `benthos/data-enrichment.yaml`
-- **Port**: 4196
-- **Status**: ✅ Updated for sequential processing
+- **Configuration**: `benthos/anomaly-enrichment.yaml`
+- **Port**: 4197
+- **Status**: ✅ NEW - Sequential pipeline implementation
 
 ### 4. Enhanced Anomaly Detection Service (Level 2 Enrichment)
-- **Input**: NATS `anomaly.detected.enriched` (ONLY)
+- **Input**: 
+  - NATS `anomaly.detected.enriched` (from sequential pipeline)
+  - NATS `enriched.for_anomaly_detection` (from legacy telemetry pipeline)
 - **Processing**:
   - Context-aware anomaly thresholds
   - Maritime-specific anomaly patterns
   - Advanced grouping and correlation
   - LLM/Ollama integration for intelligent context
 - **Output**: NATS `anomaly.detected.enriched.final`
-- **Key Features**:
-  - Leverages Level 1 enrichment context
-  - Applies weather-adjusted thresholds
-  - Groups related anomalies by operational context
-  - Adds AI-enhanced contextual information
 - **Configuration**: `services/enhanced-anomaly-detection/`
 - **Port**: 9082
-- **Status**: ✅ Updated for sequential processing
+- **Status**: ✅ Updated to support both pipelines
 
 ### 5. Benthos Correlation Service (Incident Formation)
-- **Input**: NATS `anomaly.detected.enriched.final` (ONLY)
+- **Input**: Multiple NATS topics for comprehensive correlation:
+  - `anomaly.detected.enriched.final` (from sequential pipeline)
+  - `anomaly.detected` and `anomaly.detected.enriched` (legacy)
+  - `logs.anomalous` (direct log anomalies)
+  - `telemetry.network.anomaly` (network anomalies)
 - **Processing**:
   - Final deduplication and suppression
   - Multi-event correlation
@@ -103,14 +129,9 @@ This document describes the refactored modular event processing pipeline that en
   - Timeline creation
   - Runbook suggestions
 - **Output**: NATS `incidents.created`
-- **Key Features**:
-  - Works exclusively with fully enriched anomaly events
-  - Enhanced correlation logic for enriched data
-  - Preserves all enrichment context in incidents
-  - Maintains complete traceability chain
 - **Configuration**: `benthos/benthos.yaml`
 - **Port**: 4195
-- **Status**: ✅ Updated for sequential processing
+- **Status**: ✅ Updated to support sequential pipeline while preserving legacy inputs
 
 ### 6. Incident API Service
 - **Input**: NATS `incidents.created`
@@ -125,13 +146,27 @@ This document describes the refactored modular event processing pipeline that en
 
 ## NATS Topic Reference
 
+### Sequential Anomaly Processing Topics
+
 | Topic | Publisher | Subscriber | Purpose |
 |-------|-----------|------------|---------|
 | `logs.anomalous` | Vector | Anomaly Detection Service | Filtered ERROR/WARNING logs |
-| `anomaly.detected` | Anomaly Detection Service | Benthos Enrichment | Basic anomaly events |
-| `anomaly.detected.enriched` | Benthos Enrichment | Enhanced Anomaly Detection | Level 1 enriched anomalies |
+| `anomaly.detected` | Anomaly Detection Service | Benthos Anomaly Enrichment | Basic anomaly events |
+| `anomaly.detected.enriched` | Benthos Anomaly Enrichment | Enhanced Anomaly Detection | Level 1 enriched anomalies |
 | `anomaly.detected.enriched.final` | Enhanced Anomaly Detection | Benthos Correlation | Level 2 enriched anomalies |
 | `incidents.created` | Benthos Correlation | Incident API | Final incident objects |
+
+### Legacy Telemetry Processing Topics (Preserved)
+
+| Topic | Publisher | Subscriber | Purpose |
+|-------|-----------|------------|---------|
+| `metrics.system.*` | VMAgent/Node-Exporter | Benthos Data Enrichment | System metrics |
+| `telemetry.satellite.*` | Satellite Collectors | Benthos Data Enrichment | VSAT/RF data |
+| `telemetry.network.*` | Network Device Collector | Benthos Data Enrichment | Network device metrics |
+| `external.weather.*` | Weather Services | Benthos Data Enrichment | Weather conditions |
+| `telemetry.ship.*` | Ship Systems | Benthos Data Enrichment | Navigation/position data |
+| `logs.application.*` | Applications | Benthos Data Enrichment | Application logs |
+| `enriched.for_anomaly_detection` | Benthos Data Enrichment | Enhanced Anomaly Detection | Enriched telemetry |
 
 ## Key Design Principles
 

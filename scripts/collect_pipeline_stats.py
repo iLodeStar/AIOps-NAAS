@@ -37,6 +37,7 @@ class PipelineStatsCollector:
             'vector': {'port': 8686, 'endpoint': '/metrics', 'type': 'prometheus'},
             'anomaly_detection': {'port': 8080, 'endpoint': '/health', 'type': 'json'},
             'benthos_enrichment': {'port': 4196, 'endpoint': '/stats', 'type': 'json'},
+            'benthos_anomaly_enrichment': {'port': 4197, 'endpoint': '/stats', 'type': 'json'},
             'enhanced_anomaly': {'port': 9082, 'endpoint': '/health', 'type': 'json'}, 
             'benthos_correlation': {'port': 4195, 'endpoint': '/stats', 'type': 'json'},
             'incident_api': {'port': 8081, 'endpoint': '/health', 'type': 'json'}

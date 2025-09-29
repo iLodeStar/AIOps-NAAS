@@ -1,0 +1,196 @@
+# Benthos Anomaly Enrichment Configuration - Level 1 Anomaly Processing
+# This configuration implements the sequential pipeline for anomaly enrichment
+# as requested in the modular pipeline refactor (Issue #151)
+
+http:
+  enabled: true
+  address: "0.0.0.0:4197"  # Different port to avoid conflicts
+  debug_endpoints: true
+
+# Input: Consume anomaly events from basic anomaly detection service
+input:
+  nats:
+    urls: ["nats://nats:4222"]
+    subject: "anomaly.detected"
+    queue: "anomaly_enrichment"
+
+# Processing pipeline for anomaly enrichment
+pipeline:
+  processors:
+    # Add enrichment timestamp and correlation ID
+    - mapping: |
+        root.enrichment_id = uuid_v4()
+        root.enrichment_timestamp = now()
+        root.original_timestamp = this.timestamp
+        
+        # Preserve original anomaly data
+        root.original_anomaly = this
+        
+        # Extract key fields from anomaly event
+        root.ship_id = this.ship_id || this.metadata.ship_id || "unknown-ship"
+        root.metric_name = this.metric_name || "unknown_metric"
+        root.metric_value = this.metric_value || this.anomaly_score || 0.0
+        root.anomaly_score = this.anomaly_score || 0.0
+        root.severity = this.severity || "medium"
+        root.device_id = this.device_id || this.metadata.device_id || "unknown-device"
+        root.service = this.service || this.metadata.service || "unknown_service"
+        root.host = this.host || this.metadata.host || "unknown"
+        
+        # Preserve tracking information for end-to-end traceability
+        root.tracking_id = this.tracking_id
+        root.correlation_id = this.correlation_id || uuid_v4()
+        
+        # Preserve original error message for debugging
+        root.log_message = this.log_message || this.message || ""
+        
+    # Cache recent anomaly data for context enrichment
+    - cache:
+        resource: "enrichment_cache"
+        operator: "set"
+        key: "${! json(\"ship_id\") + \"_anomaly_latest\" }"
+        value: "${! content() }"
+        ttl: "300s"  # Keep for 5 minutes for correlation
+        
+    # Fetch related ship context data (if available from telemetry)
+    - cache:
+        resource: "enrichment_cache"
+        operator: "get"
+        key: "${! json(\"ship_id\") + \"_ship_context\" }"
+        
+    # Enrich anomaly with maritime and operational context
+    - mapping: |
+        # Parse cached ship context data
+        let ship_context = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
+          meta("cache_result").parse_json()
+        } else {
+          null
+        }
+        
+        # Add maritime context if available
+        if ship_context != null {
+          root.maritime_context = {
+            "position": {
+              "latitude": ship_context.latitude || null,
+              "longitude": ship_context.longitude || null
+            },
+            "navigation": {
+              "heading": ship_context.heading_degrees || null,
+              "speed": ship_context.speed_knots || null
+            },
+            "attitude": {
+              "pitch": ship_context.pitch_degrees || null,
+              "roll": ship_context.roll_degrees || null,
+              "yaw": ship_context.yaw_degrees || null
+            }
+          }
+        } else {
+          root.maritime_context = {}
+        }
+        
+        # Add enrichment context based on anomaly characteristics
+        root.enrichment_context = {
+          "anomaly_enriched": true,
+          "enrichment_source": "benthos_anomaly_enrichment",
+          "context_confidence": if ship_context != null { 0.8 } else { 0.3 }
+        }
+        
+        # Enhance service context based on metric name and service
+        if this.metric_name != null {
+          if this.metric_name.contains("cpu") || this.metric_name.contains("memory") {
+            root.enrichment_context.system_resource_anomaly = true
+            root.enrichment_context.suggested_investigation = ["check_resource_utilization", "review_process_list"]
+          } else if this.metric_name.contains("network") || this.metric_name.contains("interface") {
+            root.enrichment_context.network_anomaly = true  
+            root.enrichment_context.suggested_investigation = ["check_network_interfaces", "review_traffic_patterns"]
+          } else if this.metric_name.contains("satellite") || this.metric_name.contains("snr") {
+            root.enrichment_context.satellite_anomaly = true
+            root.enrichment_context.suggested_investigation = ["check_satellite_alignment", "review_weather_conditions"]
+          }
+        }
+        
+        # Add log-based enrichment if this came from log anomaly detection
+        if this.log_message != null && this.log_message != "" {
+          root.enrichment_context.log_based_anomaly = true
+          root.enrichment_context.error_message_present = true
+          
+          # Extract patterns from log messages for better context
+          if this.log_message.contains("database") || this.log_message.contains("connection") {
+            root.enrichment_context.database_related = true
+            root.enrichment_context.suggested_investigation = ["check_database_connections", "review_connection_pool"]
+          } else if this.log_message.contains("timeout") || this.log_message.contains("slow") {
+            root.enrichment_context.performance_related = true
+            root.enrichment_context.suggested_investigation = ["check_response_times", "review_system_load"]
+          } else if this.log_message.contains("authentication") || this.log_message.contains("permission") {
+            root.enrichment_context.security_related = true
+            root.enrichment_context.suggested_investigation = ["check_access_logs", "review_permissions"]
+          }
+        }
+        
+        # Calculate operational status based on anomaly characteristics
+        root.operational_status = "normal"
+        
+        # Critical anomalies affect operational status
+        if this.anomaly_score != null && this.anomaly_score > 0.8 {
+          root.operational_status = "critical_anomaly"
+        } else if this.severity != null && (this.severity == "critical" || this.severity == "high") {
+          root.operational_status = "degraded_performance"
+        } else if this.log_message != null && this.log_message.contains("fail") {
+          root.operational_status = "system_issues"
+        }
+        
+    # Add AI/ML-based context enrichment placeholder
+    # NOTE: In production, this would call LLM/Ollama for intelligent context
+    - mapping: |
+        # AI/ML enrichment simulation (replace with actual LLM call in production)
+        root.ai_enrichment = {
+          "llm_processed": false,  # Set to true when actual LLM integration added
+          "confidence_score": 0.6,
+          "suggested_priority": if this.anomaly_score != null && this.anomaly_score > 0.7 {
+            "high"
+          } else if this.severity == "critical" {
+            "critical"
+          } else {
+            "medium"
+          },
+          "enrichment_notes": "Level 1 anomaly enrichment completed - ready for enhanced anomaly detection"
+        }
+        
+        # Set correlation level for next stage
+        root.correlation_level = "level_1_anomaly_enriched"
+        root.pipeline_stage = "anomaly_enrichment_complete"
+
+# Output: Send enriched anomaly events to enhanced anomaly detection
+output:
+  broker:
+    pattern: fan_out
+    outputs:
+      # Send enriched anomaly to enhanced anomaly detection service
+      - nats:
+          urls: ["nats://nats:4222"]
+          subject: "anomaly.detected.enriched"
+          
+      # Log enriched events for debugging
+      - stdout: {}
+
+# Cache resources for data correlation
+cache_resources:
+  - label: "enrichment_cache"
+    memory:
+      default_ttl: "600s"
+      compaction_interval: "60s"
+
+# Metrics and monitoring
+metrics:
+  prometheus: {}
+    
+logger:
+  level: INFO
+  format: json
+  add_timestamp: true
+
+# Rate limiting to handle high-throughput data
+rate_limit_resources:
+  - label: "enrichment_rate_limit"
+    local:
+      count: 1000
+      interval: "1s"
