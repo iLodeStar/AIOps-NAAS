@@ -1,6 +1,7 @@
 # Benthos Data Enrichment Configuration for Sequential Anomaly Processing  
 # This configuration implements Level 1 anomaly enrichment as part of the sequential pipeline:
 # anomaly.detected → benthos-enrichment → anomaly.detected.enriched → enhanced-anomaly-detection
+# Uses latest codebase with comprehensive logging and device registry integration
 
 http:
   enabled: true
@@ -14,259 +15,385 @@ input:
     subject: "anomaly.detected"
     queue: "benthos_enrichment"
 
-# Processing pipeline for data enrichment and correlation
+# Processing pipeline for anomaly data enrichment using AI/ML over default rules
 pipeline:
   processors:
-    # Add enrichment timestamp and correlation ID
+    # Debug logging to track anomaly events through enrichment pipeline
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_01 received_anomaly=${! json() }
+          
+    # Input validation and standardization with comprehensive null handling (adapted for anomaly events)
     - mapping: |
-        root.enrichment_id = uuid_v4()
-        root.enrichment_timestamp = now()
-        root.original_timestamp = this.timestamp
+        # Log raw input for debugging purposes
+        root.debug_input = {
+          "raw_content": content(),
+          "content_type": content().type(),
+          "timestamp": now(),
+          "metadata": meta(),
+          "source_subject": meta("nats_subject")
+        }
         
-        # Determine data source type from NATS subject
-        root.data_source = meta("nats_subject").split(".").index(1) 
-        root.data_category = meta("nats_subject").split(".").index(2).catch("general")
-        
-        # Add ship identifier
-        root.ship_id = this.ship_id || "ship-01"
-        
-        # Preserve original data
-        root.original_data = this
-        
-    # Cache recent data for correlation lookups
-    - cache:
-        resource: "enrichment_cache"
-        operator: "set"
-        key: "${! json(\"data_source\") + \"_\" + json(\"ship_id\") + \"_latest\" }"
-        value: "${! content() }"
-        ttl: "300s"  # Keep for 5 minutes for correlation
-        
-    # Fetch related data for correlation
-    - cache:
-        resource: "enrichment_cache"
-        operator: "get"
-        key: "${! if json(\"data_source\") == \"system\" { \"satellite_\" + json(\"ship_id\") + \"_latest\" } else if json(\"data_source\") == \"satellite\" { \"weather_\" + json(\"ship_id\") + \"_latest\" } else if json(\"data_source\") == \"network\" { \"system_\" + json(\"ship_id\") + \"_latest\" } else { \"\" } }"
-        
-    # Enrich with contextual data
-    - mapping: |
-        # Parse cached related data
-        let related = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
-          meta("cache_result").parse_json()
+        # Ensure we have a proper anomaly event structure
+        if content().type() == "object" {
+          # Already an object (expected for anomaly events), use as-is but ensure required fields
+          root = this
+        } else if content().type() == "string" {
+          # Try to parse as JSON first
+          let raw = content().string().trim()
+          let cleaned = raw.replace_all("^\\uFEFF", "") # remove BOM if present
+          let is_json = cleaned.length() > 0 && (cleaned.slice(0, 1) == "{" || cleaned.slice(0, 1) == "[")
+          root = if is_json {
+            if content().string().parse_json() != null {
+              content().string().parse_json()
+            } else {
+              # Malformed anomaly event, create wrapper
+              {
+                "message": content(),
+                "level": "ERROR",
+                "timestamp": now(),
+                "source": "malformed_anomaly_event",
+                "host": "unknown",
+                "anomaly_score": 0.5
+              }
+            }
+          } else {
+            # Plain text anomaly event (unexpected)
+            {
+              "message": content(),
+              "level": "WARNING",
+              "timestamp": now(),
+              "source": "text_anomaly_event",
+              "host": "unknown",
+              "anomaly_score": 0.4
+            }
+          }
         } else {
-          null
-        }
-        
-        # Create enriched context based on data correlations
-        root.enrichment_context = {}
-        
-        # System metrics enrichment with satellite context
-        if this.data_source == "system" && related != null && related.data_source == "satellite" {
-          root.enrichment_context.satellite_quality = {
-            "snr_db": related.original_data.snr_db || null,
-            "signal_strength": related.original_data.signal_strength_dbm || null,
-            "ber": related.original_data.ber || null
-          }
-          root.enrichment_context.correlation_type = "system_satellite"
-        }
-        
-        # Satellite data enrichment with weather context
-        if this.data_source == "satellite" && related != null && related.data_source == "weather" {
-          root.enrichment_context.weather_impact = {
-            "rain_rate": related.original_data.rain_rate_mm_hr || null,
-            "wind_speed": related.original_data.wind_speed_kts || null,
-            "cloud_cover": related.original_data.cloud_cover_percent || null
-          }
-          root.enrichment_context.correlation_type = "satellite_weather"
-        }
-        
-        # Network metrics enrichment with system context  
-        if this.data_source == "network" && related != null && related.data_source == "system" {
-          root.enrichment_context.system_load = {
-            "cpu_usage": related.original_data.cpu_usage_percent || null,
-            "memory_usage": related.original_data.memory_usage_percent || null,
-            "disk_io": related.original_data.disk_io_utilization || null
-          }
-          root.enrichment_context.correlation_type = "network_system"
-        }
-        
-    # Fetch ship position for maritime context
-    - cache:
-        resource: "enrichment_cache"
-        operator: "get"
-        key: "${! \"ship_\" + json(\"ship_id\") + \"_latest\" }"
-        
-    # Add maritime operational context
-    - mapping: |
-        # Parse ship telemetry data
-        let ship_data = if meta("cache_result").type() == "string" && meta("cache_result") != "" {
-          meta("cache_result").parse_json()
-        } else {
-          null
-        }
-        
-        # Add maritime context
-        if ship_data != null && ship_data.data_source == "ship" {
-          root.maritime_context = {
-            "position": {
-              "latitude": ship_data.original_data.latitude || null,
-              "longitude": ship_data.original_data.longitude || null
-            },
-            "navigation": {
-              "heading": ship_data.original_data.heading_degrees || null,
-              "speed": ship_data.original_data.speed_knots || null
-            },
-            "attitude": {
-              "pitch": ship_data.original_data.pitch_degrees || null,
-              "roll": ship_data.original_data.roll_degrees || null,
-              "yaw": ship_data.original_data.yaw_degrees || null
-            }
+          # Unknown format, wrap in standardized structure
+          root = {
+            "message": content().string(),
+            "level": "WARNING", 
+            "timestamp": now(),
+            "source": "unknown_anomaly_format",
+            "host": "unknown",
+            "anomaly_score": 0.3,
+            "valueType": content().type()
           }
         }
         
-        # Calculate operational status based on correlations
-        root.operational_status = "normal"
-        
-        # Degraded satellite conditions
-        if this.enrichment_context.satellite_quality != null {
-          let snr = this.enrichment_context.satellite_quality.snr_db
-          let ber = this.enrichment_context.satellite_quality.ber
-          if snr != null && snr < 10 {
-            root.operational_status = "degraded_comms"
-          }
-          if ber != null && ber > 0.001 {
-            root.operational_status = "poor_link_quality"
-          }
-        }
-        
-        # Weather impact on satellite
-        if this.enrichment_context.weather_impact != null {
-          let rain = this.enrichment_context.weather_impact.rain_rate
-          if rain != null && rain > 5 {
-            root.operational_status = "weather_impacted"
-          }
-        }
-        
-        # Network device enrichment with system and satellite context
-        if this.data_source == "network" {
-          root.enrichment_context.network_correlation = {
-            "device_type": this.original_data.device_type || "unknown",
-            "device_ip": this.original_data.device_ip || this.original_data.ip_address,
-            "vendor": this.original_data.vendor || "unknown",
-            "location": this.original_data.location || "unknown"
-          }
-          
-          # Correlate network performance with system load
-          if system_data != null {
-            root.enrichment_context.network_correlation.system_context = {
-              "cpu_utilization": system_data.original_data.cpu_percent || null,
-              "memory_utilization": system_data.original_data.memory_percent || null,
-              "load_average": system_data.original_data.load1 || null
-            }
-            
-            # Network anomaly context based on system load
-            let cpu = system_data.original_data.cpu_percent
-            if cpu != null && cpu > 85 && this.original_data.interface_utilization_percent != null {
-              root.enrichment_context.network_correlation.high_load_correlation = true
-            }
-          }
-          
-          # Correlate network with satellite link quality
-          if related != null && related.data_source == "satellite" {
-            root.enrichment_context.network_correlation.satellite_context = {
-              "satellite_snr": related.original_data.snr_db || null,
-              "satellite_ber": related.original_data.ber || null,
-              "rain_fade_margin": related.original_data.rain_fade_margin_db || null
-            }
-            
-            # Mark satellite-dependent network components  
-            if this.original_data.device_type.or("") == "router" || this.original_data.device_type.or("") == "firewall" {
-              root.enrichment_context.network_correlation.satellite_dependent = true
-            }
-          }
-          
-          # Network device health assessment  
-          if this.original_data.cpu_utilization_percent != null || this.original_data.memory_utilization_percent != null {
-            root.enrichment_context.network_correlation.device_health = {
-              "cpu_healthy": (this.original_data.cpu_utilization_percent || 0) < 80,
-              "memory_healthy": (this.original_data.memory_utilization_percent || 0) < 85,
-              "temperature_healthy": (this.original_data.temperature_celsius || 0) < 50
-            }
-          }
-          
-          # Interface-specific correlation for switches and routers
-          if this.original_data.interfaces != null && this.original_data.interfaces.type() == "array" {
-            root.enrichment_context.network_correlation.critical_interfaces = this.original_data.interfaces.filter(interface -> interface.utilization_percent != null && interface.utilization_percent > 80).map_each(interface -> {
-              "interface": interface.interface_name,
-              "utilization": interface.utilization_percent,
-              "status": interface.oper_status.catch("unknown")
-            })
-          }
-        }
-        
-        # System enrichment with network device context
-        if this.data_source == "system" && related != null && related.data_source == "network" {
-          root.enrichment_context.network_infrastructure = {
-            "core_network_health": related.original_data.device_health || "unknown",
-            "network_device_count": 1,  # Simplified for this correlation
-            "critical_network_services": if related.original_data.device_type.or("") == "router" || related.original_data.device_type.or("") == "firewall" { ["routing", "security"] } else { ["switching"] }
-          }
-        }
-        
-        # High system load affecting network
-        if this.enrichment_context.system_load != null {
-          let cpu = this.enrichment_context.system_load.cpu_usage
-          let memory = this.enrichment_context.system_load.memory_usage
-          if (cpu != null && cpu > 80) || (memory != null && memory > 85) {
-            root.operational_status = "system_overloaded"
-          }
-        }
-        
-    # Create enriched event with correlation metadata
-    - mapping: |
-        # Create final enriched event
-        root.event_type = "enriched_telemetry"
-        root.correlation_level = "level_1_raw_data"
-        root.created_at = now()
-        
-        # Add correlation strength score
-        root.correlation_score = 0.0
-        if this.enrichment_context != {} {
-          root.correlation_score = root.correlation_score + 0.5
-        }
-        if this.maritime_context != {} {
-          root.correlation_score = root.correlation_score + 0.3
-        }
-        if this.operational_status != "normal" {
-          root.correlation_score = root.correlation_score + 0.2
-        }
-        
-        # Add processing metadata
-        root.enrichment_pipeline = {
-          "version": "1.0",
-          "processed_at": now(),
-          "correlations_applied": if this.enrichment_context.correlation_type != null { [this.enrichment_context.correlation_type] } else { [] },
-          "enrichment_sources": [this.data_source]
-        }
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_02 validated_input=${! json() }
 
-# Output: Send enriched data to multiple destinations
+    # Core field normalization with defensive null handling (adapted for anomaly events)
+    - mapping: |
+        # Generate enrichment correlation ID if missing
+        root = this
+        root.enrichment_correlation_id = if this.correlation_id != null && this.correlation_id != "" { 
+          this.correlation_id 
+        } else { 
+          uuid_v4() 
+        }
+        root.enrichment_timestamp = now()
+        root.enrichment_stage = "level_1_anomaly_enrichment"
+        
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_03 normalized_fields=${! json() }
+
+    # Enhanced ship_id resolution using Device Registry service (same as correlation service)
+    - mapping: |
+        # Enhanced ship_id resolution using Device Registry service
+        root = this
+        if this.metadata != null {
+          if this.metadata.ship_id != null {
+            root.ship_id = this.metadata.ship_id
+          } else {
+            root.ship_id = "enrichment_wrong_else_1"
+          }
+        } else {
+          root.ship_id = "enrichment_wrong_else_2"
+        }
+        root.original_ship_id = root.ship_id
+        root.original_host = this.host
+        root.registry_lookup_attempted = false
+        root.registry_lookup_success = false
+        
+        # CRITICAL FIX: Check for ship_id in multiple locations including metadata
+        root.available_ship_id = "enrichment_test_ship"
+        if root.ship_id != null && root.ship_id != "" && !root.ship_id.contains("unknown") {
+          root.available_ship_id = root.ship_id
+        } else if this.metadata != null && this.metadata.ship_id != null && this.metadata.ship_id != "" && !this.metadata.ship_id.contains("unknown") {
+          root.available_ship_id = this.metadata.ship_id
+        } else {
+          root.available_ship_id = null
+        }
+        
+        # CRITICAL DEBUG: Add detailed ship_id debug information
+        root.ship_id_debug = {
+          "original_ship_id": if root.ship_id != null { root.ship_id } else { "null" },
+          "metadata_exists": this.metadata != null,
+          "metadata_ship_id": if this.metadata != null && this.metadata.ship_id != null { this.metadata.ship_id } else { "null" },
+          "available_ship_id": if root.available_ship_id != null { root.available_ship_id } else { "null_enrichment" },
+          "processing_timestamp": now()
+        }
+        
+        # First check if we already have a valid ship_id from any source
+        if root.available_ship_id != null {
+          # Valid ship_id already exists, keep it
+          root.ship_id = root.available_ship_id
+          root.ship_id_source = if root.ship_id != null && root.ship_id != "" && !root.ship_id.contains("unknown") { "original_field" } else { "metadata_field" }
+          root.skip_lookup = true
+        } else {
+          # Need to resolve ship_id via registry lookup
+          root.registry_lookup_attempted = true
+          
+          # Try hostname-based lookup via Device Registry
+          let hostname = if this.host != null && this.host != "" { 
+            this.host 
+          } else if this.labels != null && this.labels.instance != null { 
+            this.labels.instance 
+          } else if this.hostname != null && this.hostname != "" {
+            this.hostname
+          } else if this.metadata != null && this.metadata.source_host != null && this.metadata.source_host != "" {
+            this.metadata.source_host
+          } else {
+            null
+          }
+          
+          root.lookup_hostname = hostname
+          root.skip_lookup = hostname == null
+        }
+        
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_04 ship_id_resolution=${! json() }
+
+    # Conditional HTTP lookup using HTTP processor (same as correlation service)
+    - branch:
+        request_map: |
+          # Only process messages that need registry lookup
+          if this.skip_lookup != true && this.lookup_hostname != null {
+            root = this
+          } else {
+            root = deleted()
+          }
+        processors:
+          - http:
+              url: http://device-registry:8081/lookup/${! this.lookup_hostname }
+              verb: GET
+              retries: 0
+              timeout: 5s
+          - mapping: |
+              # Process HTTP response
+              root.registry_lookup_success = this.status_code == 200
+              if this.status_code == 200 {
+                root.registry_response = this.body.parse_json().catch(error -> null)
+              } else {
+                root.registry_response = null
+              }
+          - log:
+              level: DEBUG
+              message: |
+                123TestLog ENRICHMENT_05 registry_response=${! json() }
+        result_map: |
+          # Merge HTTP response back into original message
+          if this.skip_lookup != true {
+            root.registry_lookup_success = this.registry_lookup_success
+            root.registry_response = this.registry_response
+          }
+
+    # Process registry results and apply fallback logic
+    - mapping: |
+        # Apply registry results or fallback logic
+        root = this
+        if this.skip_lookup != true {
+          if this.registry_lookup_success == true && this.registry_response != null && this.registry_response.mapping != null && this.registry_response.mapping.ship_id != null {
+            # Successful registry lookup
+            root.ship_id = this.registry_response.mapping.ship_id
+            root.ship_id_source = "registry_lookup"
+            root.registry_lookup_success = true
+            root.device_id = this.registry_response.mapping.device_id
+            root.device_type = this.registry_response.mapping.device_type
+            root.ship_name = this.registry_response.mapping.ship_name
+          } else if this.lookup_hostname != null {
+            # Registry failed or returned invalid data, use hostname fallback
+            root.ship_id = if this.lookup_hostname.contains("-") {
+              this.lookup_hostname.split("-").index(0) + "-ship"
+            } else {
+              this.lookup_hostname + "-ship"
+            }
+            root.ship_id_source = if this.registry_lookup_success == true { 
+              "registry_failed_hostname_fallback" 
+            } else { 
+              "registry_unavailable_hostname_fallback" 
+            }
+          } else {
+            # No hostname available, use ultimate fallback
+            root.ship_id = "unknown-ship"
+            root.ship_id_source = "no_hostname"
+          }
+        }
+        
+        # Add registry lookup metadata for debugging
+        root.registry_metadata = {
+          "lookup_attempted": root.registry_lookup_attempted,
+          "lookup_success": root.registry_lookup_success,
+          "ship_id_source": root.ship_id_source,
+          "original_host": root.original_host,
+          "resolved_ship_id": root.ship_id,
+          "timestamp": now()
+        }
+        
+        # Clean up temporary fields
+        root = this.without("skip_lookup", "lookup_hostname", "registry_response")
+        
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_06 registry_processed=${! json() }
+
+    # AI/ML-based anomaly enrichment (Level 1 - Maritime and Operational Context)
+    - mapping: |
+        root = this
+        
+        # Preserve original anomaly data
+        root.original_anomaly = {
+          "anomaly_score": if this.anomaly_score != null { this.anomaly_score } else { 0.5 },
+          "anomaly_type": if this.anomaly_type != null { this.anomaly_type } else { "unknown" },
+          "severity": if this.severity != null { this.severity } else if this.level != null { this.level } else { "info" },
+          "message": if this.message != null { this.message } else { "" },
+          "tracking_id": if this.tracking_id != null { this.tracking_id } else { null }
+        }
+        
+        # AI/ML Placeholder for Maritime Context Enrichment
+        # TODO: Replace with actual LLM/Ollama integration for context-aware enrichment
+        root.maritime_context = {
+          "operational_status": if this.anomaly_score != null && this.anomaly_score > 0.8 {
+            "critical_operations"
+          } else if this.anomaly_score != null && this.anomaly_score > 0.6 {
+            "degraded_operations"
+          } else {
+            "normal_operations"
+          },
+          "weather_impact_assessment": if this.message != null && (this.message.contains("network") || this.message.contains("satellite")) {
+            "potential_weather_interference"
+          } else {
+            "no_weather_correlation"
+          },
+          "communication_status": if this.message != null && this.message.contains("timeout") {
+            "communication_degraded"
+          } else if this.message != null && this.message.contains("connection") {
+            "connection_issues"
+          } else {
+            "communication_stable"
+          }
+        }
+        
+        # AI/ML Placeholder for Operational Context
+        # TODO: Integrate with Ollama for intelligent context determination
+        root.operational_context = {
+          "system_impact": if this.anomaly_score != null && this.anomaly_score > 0.7 {
+            "high_impact"
+          } else if this.anomaly_score != null && this.anomaly_score > 0.5 {
+            "medium_impact"
+          } else {
+            "low_impact"
+          },
+          "suggested_investigation": if this.message != null && this.message.contains("database") {
+            ["check_database_connections", "review_database_logs", "investigate_query_performance"]
+          } else if this.message != null && this.message.contains("cpu") {
+            ["investigate_cpu_usage", "check_cpu_intensive_processes", "review_system_load"]
+          } else if this.message != null && this.message.contains("memory") {
+            ["investigate_memory_usage", "check_memory_leaks", "review_memory_allocation"]
+          } else {
+            ["general_investigation", "check_system_health", "review_application_logs"]
+          },
+          "automation_ready": this.anomaly_score != null && this.anomaly_score < 0.8  # Only auto-remediate low-risk anomalies
+        }
+        
+        # Weather Registry Enrichment Placeholder
+        # TODO: Integrate with weather data sources
+        root.weather_context = {
+          "weather_correlation": "placeholder_for_weather_data",
+          "environmental_factors": "placeholder_for_environmental_assessment"
+        }
+        
+        # Registry-based Device Enrichment
+        root.device_context = {
+          "device_id": if root.device_id != null { root.device_id } else { "unknown-device" },
+          "device_type": if root.device_type != null { root.device_type } else { "unknown" },
+          "ship_name": if root.ship_name != null { root.ship_name } else { "Unknown Ship" },
+          "registry_enhanced": root.registry_lookup_success == true
+        }
+        
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_07 ai_ml_enriched=${! json() }
+
+    # Create enriched anomaly event with correlation metadata
+    - mapping: |
+        root = this
+        
+        # Mark as enriched anomaly event
+        root.event_type = "enriched_anomaly"
+        root.enrichment_level = "level_1_maritime_operational"
+        root.enriched_at = now()
+        
+        # Calculate enrichment confidence score
+        root.enrichment_confidence = 0.0
+        if root.maritime_context != {} {
+          root.enrichment_confidence = root.enrichment_confidence + 0.3
+        }
+        if root.operational_context != {} {
+          root.enrichment_confidence = root.enrichment_confidence + 0.3
+        }
+        if root.device_context.registry_enhanced == true {
+          root.enrichment_confidence = root.enrichment_confidence + 0.2
+        }
+        if root.tracking_id != null {
+          root.enrichment_confidence = root.enrichment_confidence + 0.2
+        }
+        
+        # Add enrichment pipeline metadata
+        root.enrichment_pipeline = {
+          "version": "2.0_ai_ml_enhanced",
+          "processed_at": now(),
+          "enrichment_sources": ["maritime_context", "operational_context", "device_registry", "weather_placeholder"],
+          "ai_ml_integration": "placeholder_for_ollama_llm",
+          "ship_id_source": root.ship_id_source
+        }
+        
+        # Ensure all required fields for next stage (enhanced-anomaly-detection)
+        root.ship_id = if root.ship_id != null && root.ship_id != "" { root.ship_id } else { "unknown-ship" }
+        root.anomaly_score = if root.original_anomaly.anomaly_score != null { root.original_anomaly.anomaly_score } else { 0.5 }
+        root.severity = if root.original_anomaly.severity != null { root.original_anomaly.severity } else { "info" }
+        root.tracking_id = root.original_anomaly.tracking_id
+        
+    - log:
+        level: DEBUG
+        message: |
+          123TestLog ENRICHMENT_08 final_enriched_event=${! json() }
+
+# Output: Send enriched anomaly data to sequential pipeline next stage
 output:
   broker:
     pattern: fan_out
     outputs:
-      # Send to storage systems (VictoriaMetrics, ClickHouse)
-      - nats:
-          urls: ["nats://nats:4222"]
-          subject: "enriched.${! json(\"data_source\") }.${! json(\"data_category\") }"
-          
-      # Send to anomaly detection with enrichment context
+      # Send to enhanced anomaly detection for Level 2 processing
       - nats:
           urls: ["nats://nats:4222"]
           subject: "anomaly.detected.enriched"
           
-      # Log enriched events for debugging
+      # Log enriched anomalies for debugging
       - stdout: {}
 
-# Cache resources for data correlation
+# Cache resources for enrichment data correlation
 cache_resources:
   - label: "enrichment_cache"
     memory:
@@ -282,9 +409,9 @@ logger:
   format: json
   add_timestamp: true
 
-# Rate limiting to handle high-throughput data
+# Rate limiting to handle high-throughput anomaly events
 rate_limit_resources:
   - label: "enrichment_rate_limit"
     local:
-      count: 1000
+      count: 500
       interval: "1s"
