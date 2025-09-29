@@ -338,23 +338,25 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos - Sequential Pipeline Final Correlation for incident creation
-  benthos:
+  # Benthos Level 1 Enrichment - Sequential Anomaly Enrichment with AI/ML Context
+  # Responsibility: Add maritime, weather, registry, and operational context using LLM/Ollama
+  # Input: anomaly.detected → Output: anomaly.detected.enriched
+  benthos-enrichment:
     image: jeffail/benthos:latest
-    container_name: aiops-benthos
+    container_name: aiops-benthos-enrichment
     ports:
-      - "4195:4195"  # HTTP API
+      - "4196:4196"  # HTTP API
     volumes:
-      - ./benthos/benthos.yaml:/benthos.yaml:ro
+      - ./benthos/enrichment.yaml:/benthos.yaml:ro
     command: ["-c", "/benthos.yaml"]
     depends_on:
       nats:
         condition: service_healthy
-      enhanced-anomaly-detection:
+      anomaly-detection:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4195/ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4196/ping"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -365,23 +367,27 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # Benthos Data Enrichment - Sequential Anomaly Enrichment (Level 1)
-  benthos-enrichment:
+  # Benthos Correlation and Incident Formation - Final stage with LLM/Ollama integration
+  # Responsibility: Deduplication, suppression, correlation logic, and incident creation
+  # Input: anomaly.detected.enriched.final → Output: incidents.created
+  benthos-correlation:
     image: jeffail/benthos:latest
-    container_name: aiops-benthos-enrichment
+    container_name: aiops-benthos-correlation
     ports:
-      - "4196:4196"  # HTTP API
+      - "4195:4195"  # HTTP API
     volumes:
-      - ./benthos/data-enrichment.yaml:/benthos.yaml:ro
+      - ./benthos/correlation.yaml:/benthos.yaml:ro
     command: ["-c", "/benthos.yaml"]
     depends_on:
       nats:
         condition: service_healthy
-      anomaly-detection:
+      enhanced-anomaly-detection:
+        condition: service_healthy
+      clickhouse:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4196/ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4195/ping"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -467,6 +473,8 @@ services:
       clickhouse:
         condition: service_healthy
       nats:
+        condition: service_healthy
+      benthos-correlation:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

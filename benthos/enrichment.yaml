@@ -1,0 +1,204 @@
+# Benthos Level 1 Enrichment Configuration
+# Sequential Pipeline Stage: anomaly.detected → benthos-enrichment → anomaly.detected.enriched
+# Purpose: Add maritime, weather, registry, and operational context using AI/ML over default rules
+# Responsibility: Context enrichment for anomaly events using LLM/Ollama integration
+
+http:
+  enabled: true
+  address: "0.0.0.0:4196"
+  debug_endpoints: true
+
+logger:
+  level: INFO
+  format: json
+
+# Input: ONLY anomaly events from basic anomaly detection service
+input:
+  nats:
+    urls: ["nats://nats:4222"]
+    subject: "anomaly.detected"
+    queue: "enrichment_queue"
+
+pipeline:
+  processors:
+    # Debug logging for received anomaly events
+    - log:
+        level: INFO
+        message: "ENRICHMENT STAGE 1: Received anomaly event: ${! json() }"
+    
+    # Validate and standardize anomaly event structure
+    - mapping: |
+        root = this
+        root.enrichment_stage = "level_1"
+        root.processing_timestamp = now()
+        
+        # Ensure required fields exist
+        root.anomaly_id = if this.anomaly_id != null { this.anomaly_id } else { uuid_v4() }
+        root.tracking_id = if this.tracking_id != null { this.tracking_id } else { "unknown" }
+        root.ship_id = if this.ship_id != null { this.ship_id } else { "unknown-ship" }
+        root.anomaly_score = if this.anomaly_score != null { this.anomaly_score } else { 0.5 }
+        
+    # Device Registry Integration for ship/device context
+    - branch:
+        request_map: |
+          root.device_id = if this.device_id != null { this.device_id } else { "unknown" }
+          root.ship_id = if this.ship_id != null { this.ship_id } else { "unknown" }
+        processors:
+          - try:
+              - http:
+                  url: "http://device-registry:8083/api/v1/devices/${! this.device_id }"
+                  verb: GET
+                  timeout: "5s"
+                  headers:
+                    Content-Type: "application/json"
+                  successful_on: [200, 404]
+              - mapping: |
+                  # Add device registry context if available
+                  root.device_context = if this.status_code == 200 {
+                    content().parse_json()
+                  } else {
+                    {
+                      "device_id": content("device_id"),
+                      "ship_id": content("ship_id"),
+                      "registry_status": "not_found"
+                    }
+                  }
+          - catch:
+              - mapping: |
+                  root.device_context = {
+                    "error": "registry_unavailable",
+                    "device_id": this.device_id,
+                    "ship_id": this.ship_id
+                  }
+        result_map: |
+          root.device_context = this.device_context
+
+    # Maritime Context Enrichment using AI/ML patterns
+    - mapping: |
+        # Add maritime operational context
+        root.maritime_context = {
+          "operational_status": if this.anomaly_score != null && this.anomaly_score > 0.8 {
+            "critical_operations"
+          } else if this.anomaly_score != null && this.anomaly_score > 0.6 {
+            "degraded_operations" 
+          } else {
+            "normal_operations"
+          },
+          "weather_correlation": "placeholder_for_weather_api",
+          "navigation_impact": if this.log_message != null && this.log_message.contains("navigation") {
+            "navigation_affected"
+          } else {
+            "navigation_normal"
+          },
+          "communication_status": if this.log_message != null && this.log_message.contains("communication") {
+            "communication_degraded"
+          } else {
+            "communication_normal"
+          }
+        }
+
+    # LLM/Ollama Integration Placeholder for Context-Aware Enrichment
+    - branch:
+        request_map: |
+          root = {
+            "anomaly_data": this,
+            "context_request": {
+              "analyze_anomaly": true,
+              "provide_maritime_context": true,
+              "suggest_investigation_steps": true
+            }
+          }
+        processors:
+          - try:
+              # Placeholder for Ollama/LLM integration
+              - http:
+                  url: "http://ollama:11434/api/generate"
+                  verb: POST
+                  timeout: "10s"
+                  headers:
+                    Content-Type: "application/json"
+                  body: |
+                    {
+                      "model": "llama2",
+                      "prompt": "Analyze this maritime anomaly and provide operational context: ${! json() }",
+                      "stream": false
+                    }
+              - mapping: |
+                  # Process LLM response for context
+                  root.llm_analysis = if this.response != null {
+                    content().parse_json().response
+                  } else {
+                    "LLM analysis unavailable"
+                  }
+          - catch:
+              - mapping: |
+                  # Fallback AI/ML context using rule-based system
+                  root.llm_analysis = {
+                    "ai_context": "rule_based_fallback",
+                    "suggested_actions": if content("anomaly_data").anomaly_score > 0.8 {
+                      ["immediate_investigation", "escalate_to_ops_team"]
+                    } else {
+                      ["monitor_closely", "schedule_maintenance_check"]
+                    },
+                    "maritime_impact": if content("anomaly_data").log_message != null && 
+                                      (content("anomaly_data").log_message.contains("engine") || 
+                                       content("anomaly_data").log_message.contains("navigation")) {
+                      "critical_system_affected"
+                    } else {
+                      "support_system_affected"
+                    }
+                  }
+        result_map: |
+          root.ai_enrichment = this.llm_analysis
+
+    # Final enrichment aggregation
+    - mapping: |
+        root = this
+        
+        # Create comprehensive enrichment context
+        root.enrichment_context = {
+          "level": "1_basic_enrichment",
+          "timestamp": now(),
+          "maritime_context": this.maritime_context,
+          "device_context": this.device_context,
+          "ai_analysis": this.ai_enrichment,
+          "operational_priority": if this.anomaly_score > 0.8 {
+            "high"
+          } else if this.anomaly_score > 0.5 {
+            "medium" 
+          } else {
+            "low"
+          },
+          "investigation_guidance": this.ai_enrichment.suggested_actions
+        }
+        
+        # Preserve original anomaly data
+        root.original_anomaly = {
+          "anomaly_id": this.anomaly_id,
+          "tracking_id": this.tracking_id,
+          "anomaly_score": this.anomaly_score,
+          "log_message": this.log_message,
+          "ship_id": this.ship_id,
+          "device_id": this.device_id,
+          "timestamp": this.timestamp
+        }
+
+    # Log enriched result
+    - log:
+        level: INFO
+        message: "ENRICHMENT STAGE 1 COMPLETE: Enriched anomaly ${! this.tracking_id } with maritime context and AI analysis"
+
+# Output: Send enriched anomaly to enhanced anomaly detection service
+output:
+  nats:
+    urls: ["nats://nats:4222"]
+    subject: "anomaly.detected.enriched"
+
+# Metrics for monitoring enrichment pipeline
+metrics:
+  prometheus:
+    prefix: benthos_enrichment
+  mapping: |
+    root = this
+    root.anomalies_enriched = 1
+    root.enrichment_level = "level_1"
