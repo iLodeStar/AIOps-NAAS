@@ -16,10 +16,10 @@ COPY anomaly_service.py .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8082/health || exit 1
+  CMD curl -f http://localhost:9082/health || exit 1
 
 # Expose port
-EXPOSE 8082
+EXPOSE 9082
 
 # Run the application
 CMD ["python", "anomaly_service.py"]

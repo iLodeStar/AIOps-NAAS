@@ -51,6 +51,14 @@ pipeline:
           }
         processors:
           - try:
+              # Prepare ClickHouse query
+              - mapping: |
+                  let first_word = if this.error_pattern.split(" ").length() > 0 {
+                    this.error_pattern.split(" ").index(0)
+                  } else {
+                    this.error_pattern
+                  }
+                  root = "SELECT count() FROM logs.incidents WHERE ship_id = '" + this.ship_id + "' AND error_pattern LIKE '%" + first_word + "%' AND timestamp > now() - INTERVAL 5 MINUTE"
               # Check ClickHouse for recent similar incidents
               - http:
                   url: "http://clickhouse:8123/"
@@ -58,13 +66,8 @@ pipeline:
                   timeout: "10s"
                   headers:
                     Content-Type: "text/plain"
-                  body: |
-                    SELECT count() FROM logs.incidents 
-                    WHERE ship_id = '${! this.ship_id }' 
-                    AND error_pattern LIKE '%${! this.error_pattern.split(" ")[0] }%'
-                    AND timestamp > now() - INTERVAL 5 MINUTE
               - mapping: |
-                  root.duplicate_count = content().string().trim().number()
+                  root.duplicate_count = this.string().trim().number().catch(0)
           - catch:
               - mapping: |
                   root.duplicate_count = 0
@@ -124,6 +127,13 @@ pipeline:
           }
         processors:
           - try:
+              # Prepare Ollama request payload
+              - mapping: |
+                  root = {
+                    "model": "llama2",
+                    "prompt": "Analyze this maritime incident and provide comprehensive remediation guidance. Incident data: " + this.incident_data.string() + ". Provide specific runbooks, root cause analysis, and immediate actions required.",
+                    "stream": false
+                  }
               # LLM analysis for incident formation
               - http:
                   url: "http://ollama:11434/api/generate"
@@ -131,17 +141,11 @@ pipeline:
                   timeout: "15s"
                   headers:
                     Content-Type: "application/json"
-                  body: |
-                    {
-                      "model": "llama2",
-                      "prompt": "Analyze this maritime incident and provide comprehensive remediation guidance. Incident data: ${! json() }. Provide specific runbooks, root cause analysis, and immediate actions required.",
-                      "stream": false
-                    }
               - mapping: |
                   # Process LLM response for incident formation
                   root.llm_incident_analysis = if this.response != null {
                     {
-                      "analysis": content().parse_json().response,
+                      "analysis": this.response,
                       "timestamp": now(),
                       "model_used": "llama2"
                     }
@@ -157,11 +161,11 @@ pipeline:
               - mapping: |
                   root.llm_incident_analysis = {
                     "analysis": "rule_based_fallback",
-                    "suggested_runbooks": if content("incident_data").correlation_context.related_systems.contains("database") {
+                    "suggested_runbooks": if this.incident_data.correlation_context.related_systems != null && this.incident_data.correlation_context.related_systems.contains("database") {
                       ["investigate_database_connectivity", "check_database_locks", "review_database_performance"]
-                    } else if content("incident_data").correlation_context.related_systems.contains("network") {
+                    } else if this.incident_data.correlation_context.related_systems != null && this.incident_data.correlation_context.related_systems.contains("network") {
                       ["network_connectivity_check", "satellite_link_diagnostics", "communication_failover"]
-                    } else if content("incident_data").correlation_context.related_systems.contains("engine") {
+                    } else if this.incident_data.correlation_context.related_systems != null && this.incident_data.correlation_context.related_systems.contains("engine") {
                       ["engine_diagnostics", "power_system_check", "maintenance_schedule_review"]
                     } else {
                       ["general_system_health_check", "log_analysis", "escalate_to_technical_team"]
@@ -171,7 +175,7 @@ pipeline:
                       "assess_safety_impact", 
                       "notify_operations_team"
                     ],
-                    "estimated_resolution_time": if content("incident_data").final_anomaly_score > 0.8 {
+                    "estimated_resolution_time": if this.incident_data.final_anomaly_score != null && this.incident_data.final_anomaly_score > 0.8 {
                       "immediate_attention_required"
                     } else {
                       "within_24_hours"
@@ -209,11 +213,15 @@ pipeline:
                      else if this.final_anomaly_score > 0.6 { "P2_high" }
                      else if this.final_anomaly_score > 0.4 { "P3_medium" }
                      else { "P4_low" },
-          "category": this.correlation_context.related_systems[0],
+          "category": if this.correlation_context.related_systems != null && this.correlation_context.related_systems.length() > 0 {
+            this.correlation_context.related_systems.index(0)
+          } else {
+            "unknown"
+          },
           
           # Incident details
           "title": if this.log_message != null {
-            "Maritime System Alert: " + this.log_message.split(" ").slice(0, 10).join(" ")
+            "Maritime System Alert: " + this.log_message
           } else {
             "System Anomaly Detected on " + this.ship_id
           },
@@ -248,10 +256,4 @@ output:
 
 # Metrics for monitoring correlation pipeline
 metrics:
-  prometheus:
-    prefix: benthos_correlation
-  mapping: |
-    root = this
-    root.incidents_created = 1
-    root.severity = this.severity
-    root.correlation_stage = "final"
+  prometheus: {}
