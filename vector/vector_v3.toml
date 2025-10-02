@@ -1,0 +1,195 @@
+# vector_v3.toml - Vector v0.49 (Debian) - V3 with tracking_id generation
+#
+# V3 Changes:
+# - Added tracking_id generation (UUID v4) for all log messages
+# - Added timestamp normalization
+# - Preserves all original fields
+# - Tracking ID propagates through entire pipeline
+
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# ----------------------
+# Sources
+# ----------------------
+[sources.host_metrics]
+type = "host_metrics"
+scrape_interval_secs = 10
+
+[sources.syslog_udp]
+type = "syslog"
+address = "0.0.0.0:1514"
+mode = "udp"
+
+[sources.syslog_tcp]
+type = "syslog"
+address = "0.0.0.0:1516"
+mode = "tcp"
+
+[sources.snmp_nats]
+type = "nats"
+url = "nats://nats:4222"
+subject = "telemetry.network.>"
+connection_name = "vector-snmp-collector"
+
+[sources.app_logs_nats]
+type = "nats"
+url = "nats://nats:4222"
+subject = "logs.applications"
+connection_name = "vector-app-logs"
+
+[sources.file_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+read_from = "beginning"
+
+# ----------------------
+# V3 Transforms - Tracking ID Generation
+# ----------------------
+
+# Add tracking_id to all metrics-derived logs
+[transforms.metrics_for_logs]
+type = "metric_to_log"
+inputs = ["host_metrics"]
+
+[transforms.add_tracking_id_metrics]
+type = "remap"
+inputs = ["metrics_for_logs"]
+source = '''
+.tracking_id = uuid_v4()
+.ts = now()
+.schema_version = "v3.0"
+'''
+
+# Add tracking_id to syslog messages
+[transforms.add_tracking_id_syslog]
+type = "remap"
+inputs = ["syslog_udp", "syslog_tcp"]
+source = '''
+.tracking_id = uuid_v4()
+.ts = now()
+.schema_version = "v3.0"
+'''
+
+# Add tracking_id to SNMP telemetry
+[transforms.add_tracking_id_snmp]
+type = "remap"
+inputs = ["snmp_nats"]
+source = '''
+.tracking_id = uuid_v4()
+.ts = now()
+.schema_version = "v3.0"
+'''
+
+# Add tracking_id to application logs
+[transforms.add_tracking_id_app]
+type = "remap"
+inputs = ["app_logs_nats"]
+source = '''
+.tracking_id = uuid_v4()
+.ts = now()
+.schema_version = "v3.0"
+'''
+
+# Add tracking_id to file logs
+[transforms.add_tracking_id_file]
+type = "remap"
+inputs = ["file_logs"]
+source = '''
+.tracking_id = uuid_v4()
+.ts = now()
+.schema_version = "v3.0"
+'''
+
+# ----------------------
+# Format for ClickHouse
+# ----------------------
+[transforms.format_for_clickhouse]
+type = "remap"
+inputs = [
+    "add_tracking_id_metrics",
+    "add_tracking_id_syslog",
+    "add_tracking_id_snmp",
+    "add_tracking_id_app",
+    "add_tracking_id_file"
+]
+source = '''
+# Ensure all required fields exist
+.timestamp = .ts ?? now()
+.ship_id = .ship_id ?? "unknown"
+.message = .message ?? .msg ?? to_string!(.value)
+.tracking_id = .tracking_id ?? uuid_v4()
+
+# Normalize severity
+if exists(.severity) {
+    .severity = downcase!(.severity)
+} else if exists(.level) {
+    .severity = downcase!(.level)
+} else {
+    .severity = "info"
+}
+
+# Add source type
+.source_type = .source_type ?? "vector"
+'''
+
+# ----------------------
+# Anomaly Detection Filter
+# ----------------------
+[transforms.filter_for_anomalies]
+type = "filter"
+inputs = ["format_for_clickhouse"]
+condition = '''
+# Filter logs that might contain anomalies
+contains(to_string!(.message), "error") ||
+contains(to_string!(.message), "warning") ||
+contains(to_string!(.message), "critical") ||
+contains(to_string!(.message), "timeout") ||
+contains(to_string!(.message), "failed") ||
+to_float(.value ?? 0.0) > 0.8
+'''
+
+# ----------------------
+# Sinks
+# ----------------------
+
+# Send all logs to ClickHouse
+[sinks.clickhouse_logs]
+type = "clickhouse"
+inputs = ["format_for_clickhouse"]
+endpoint = "http://clickhouse:8123"
+database = "aiops"
+table = "logs"
+compression = "gzip"
+batch.max_events = 1000
+batch.timeout_secs = 5
+
+[sinks.clickhouse_logs.encoding]
+timestamp_format = "rfc3339"
+
+# Send anomalous logs to NATS for detection
+[sinks.nats_anomalous]
+type = "nats"
+inputs = ["filter_for_anomalies"]
+url = "nats://nats:4222"
+subject = "logs.anomalous"
+connection_name = "vector-anomaly-publisher"
+
+[sinks.nats_anomalous.encoding.codec]
+= "json"
+
+# Console sink for debugging (optional)
+[sinks.console_debug]
+type = "console"
+inputs = ["format_for_clickhouse"]
+target = "stdout"
+
+[sinks.console_debug.encoding.codec]
+= "json"
+
+# Add a filter to limit console output
+[transforms.sample_for_console]
+type = "sample"
+inputs = ["format_for_clickhouse"]
+rate = 10  # Only 10% of logs to console
