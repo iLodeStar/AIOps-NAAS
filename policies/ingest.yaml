@@ -1,0 +1,36 @@
+# Ingestion Policy - Version 3.0
+
+logs:
+  min_severity: INFO  # Minimum log level to ingest (DEBUG/INFO/WARNING/ERROR/FATAL)
+  sampling:
+    default: 1.0  # Sample rate during normal operation (1.0 = 100%)
+    storm: 0.4  # Sample rate during log storms (0.4 = 40%)
+  max_msg_size_bytes: 16384  # Max message size (16KB)
+  
+snmp:
+  intervals_sec:
+    vsat_5g: 20  # VSAT/5G modems - high priority
+    firewalls: 45  # Firewalls
+    routers_switches: 60  # Network infrastructure
+    aps_wlcs: 90  # WiFi APs and controllers
+  burst_on_anomaly: true  # Increase poll rate when anomaly detected
+  burst_interval_sec: 10  # Poll every 10s during burst
+  burst_duration_min: 20  # Burst for 20 minutes
+  prefer_v3: true  # Prefer SNMPv3 over v2c for security
+  timeout_sec: 3
+  retries: 1
+
+metrics:
+  scrape_interval_sec:
+    node: 15  # node_exporter (system metrics)
+    app_exporters: 30  # Application exporters
+    blackbox: 30  # Blackbox probes
+  scrape_timeout_sec: 3
+  retries: 1
+  cardinality_limits:
+    max_labels_per_metric: 20
+    max_unique_values_per_label: 1000
+
+flows:
+  enabled: false  # sFlow/NetFlow (disabled by default, high bandwidth)
+  sample_rate: 1024  # 1:1024 sampling if enabled

@@ -1,0 +1,32 @@
+# SLO Policy - Version 3.0
+
+# Fast Path SLOs (deterministic)
+fast_path:
+  incident_latency_p95_ms: 1500  # P95 < 1.5s
+  incident_latency_p99_ms: 3000  # P99 < 3s
+  success_rate_pct: 99.5  # 99.5% success rate
+  
+# Insight Path SLOs (async LLM)
+insight_path:
+  llm_enrichment_p95_ms: 10000  # P95 < 10s
+  llm_enrichment_p99_ms: 20000  # P99 < 20s
+  llm_success_rate_pct: 95.0  # 95% success (lower than Fast Path)
+  cache_hit_rate_pct: 60.0  # Target 60% cache hits
+
+# Queue health SLOs
+queue:
+  consumer_lag_max: 100  # Max 100 messages lag
+  retry_rate_pct: 1.0  # < 1% retries
+  dlq_rate_pct: 0.1  # < 0.1% to dead-letter queue
+
+# Component availability
+availability:
+  nats_uptime_pct: 99.9
+  clickhouse_uptime_pct: 99.9
+  grafana_uptime_pct: 99.5
+
+# Alerting thresholds (when to alert on SLO violations)
+alerting:
+  fast_path_latency_violation_min: 5  # Alert after 5min violation
+  insight_path_latency_violation_min: 10
+  success_rate_violation_min: 3

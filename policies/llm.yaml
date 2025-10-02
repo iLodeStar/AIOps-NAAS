@@ -1,0 +1,62 @@
+# LLM Enrichment Policy - Version 3.0
+
+enabled: true  # Enable async LLM enrichment
+mode: async  # Always async (never in Fast Path)
+
+# Model selection (Ollama)
+model: "phi3:mini"  # or "qwen2.5:3b-instruct"
+model_params:
+  temperature: 0.25  # Low temp for deterministic outputs
+  max_tokens: 256  # Keep narratives concise
+  top_p: 0.9
+  top_k: 40
+
+# Performance limits
+timeout_ms: 300  # 300ms max for LLM call
+max_retries: 1  # Single retry on failure
+circuit_breaker:
+  failure_threshold: 5  # Open after 5 failures
+  timeout_sec: 60  # Stay open for 1 minute
+  half_open_requests: 3  # Test with 3 requests
+
+# Caching
+cache_ttl_min: 45  # Cache responses for 45 minutes
+cache_enabled: true
+cache_key_fields:  # Fields to use for cache key
+  - incident_type
+  - severity
+  - scope
+
+# RAG (Retrieval-Augmented Generation)
+rag:
+  enabled: true  # Use Qdrant for context retrieval
+  max_context_docs: 5  # Max documents to retrieve
+  min_similarity: 0.7  # Minimum similarity score
+  sources:
+    - runbooks  # Retrieve relevant runbooks
+    - policies  # Retrieve policy excerpts
+    - incidents  # Retrieve similar historical incidents
+
+# Offline-only enforcement
+offline_only: true  # Never call external APIs
+local_data_only: true  # Use only ClickHouse/NATS/Qdrant data
+
+# Output validation
+require_json: true  # Enforce strict JSON output
+required_fields:  # Must be present in LLM response
+  - narrative
+  - confidence
+  - evidence_refs
+  - runbooks
+
+# Priorities
+priority_by_severity:
+  critical: 10  # Process critical incidents first
+  high: 7
+  medium: 5
+  low: 3
+
+# Rate limiting
+max_concurrent_requests: 3  # Max parallel LLM calls
+queue_size: 100  # Max queued requests
+drop_on_overflow: false  # Block instead of dropping

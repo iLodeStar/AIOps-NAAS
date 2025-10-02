@@ -1,0 +1,37 @@
+# AIOps-NAAS Policy Configuration - Version 3.0
+# This is the master policy file that includes all segmented policy sections
+# Each section can be overridden at ship level for customization
+
+schema_version: "3.0"
+
+# Include segmented policy files
+includes:
+  - ingest.yaml
+  - detect.yaml
+  - correlate.yaml
+  - notify.yaml
+  - remediate.yaml
+  - llm.yaml
+  - retention.yaml
+  - privacy.yaml
+  - slo.yaml
+
+# Ship-level overrides (optional)
+# ship_overrides:
+#   viking-star:
+#     llm:
+#       enabled: false  # Disable LLM on this specific ship
+#   viking-sky:
+#     retention:
+#       logs_days: 7  # Keep more logs on this ship
+
+# Profile selection (poc/core-fast/full)
+profile: full
+
+# Feature flags
+features:
+  enable_llm_enrichment: true
+  enable_qdrant_rag: true
+  enable_stats_collection: true
+  enable_two_person_approval: true
+  dry_run_remediation: false
