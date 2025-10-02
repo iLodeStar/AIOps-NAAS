@@ -1,8 +1,24 @@
 # Modular Sequential Event Processing Pipeline Architecture
 
+## Quick Links
+
+📚 **Related Documentation:**
+- [Validation Report](SEQUENTIAL_PIPELINE_VALIDATION.md) - Implementation validation with code evidence
+- [Visual Diagrams](SEQUENTIAL_PIPELINE_DIAGRAM.md) - Mermaid diagrams and troubleshooting
+- [Architecture Overview](ARCHITECTURE_OVERVIEW.md) - Complete system architecture
+- [Main README](../README.md) - Project overview with pipeline section
+- [Quick Reference](quick-reference.md) - Commands and access points
+
+🔍 **Quick Actions:**
+- Test pipeline: `./scripts/verify_modular_pipeline.sh`
+- Check service health: See [health check commands](SEQUENTIAL_PIPELINE_DIAGRAM.md#health-check-commands)
+- Troubleshoot: See [troubleshooting guide](SEQUENTIAL_PIPELINE_DIAGRAM.md#troubleshooting)
+
 ## Overview
 
 This document describes the complete implementation of the modular, sequential event processing pipeline that refactors the AIOps-NAAS system for proper separation of concerns, AI/ML integration, and traceable incident management.
+
+**Status**: ✅ **PRODUCTION-READY** - All components implemented, validated, and documented.
 
 ## Sequential Pipeline Flow
 

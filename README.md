@@ -69,11 +69,15 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 - Deploy: k3s + Argo CD; Harbor registry cache (opt)
 
 ## Getting Started
+
+**📚 Documentation**: See [Documentation Index](docs/INDEX.md) for complete guide to all documentation.
+
 1. Clone the repo.
 2. **Configure for your environment**: Copy and customize vendor-specific parameters
-3. Read docs/architecture.md to understand the edge+core design.
-4. Review docs/roadmap.md for implementation status and milestones.
-5. **For manual testing**: See docs/validation/manual-testing-guide.md for comprehensive validation procedures.
+3. Read [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) to understand the system architecture.
+4. Review [Sequential Pipeline Architecture](docs/sequential-pipeline-architecture.md) for event processing design.
+5. Review [docs/roadmap.md](docs/roadmap.md) for implementation status and milestones.
+6. **For manual testing**: See [docs/validation/manual-testing-guide.md](docs/validation/manual-testing-guide.md) for comprehensive validation procedures.
 
 ## Configuration
 **Vendor Integration**: The platform supports configurable integration with various satellite VSAT vendors, network protocols, and external systems:
