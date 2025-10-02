@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: AIOps Incident API
+    type: prometheus  # Use prometheus type for HTTP proxy
+    uid: aiops-incident-api
+    url: http://incident-api:9081
+    access: proxy
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: GET
+      timeInterval: 30s
+    secureJsonData: {}

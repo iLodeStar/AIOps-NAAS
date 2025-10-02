@@ -1,0 +1,30 @@
+{
+  "name": "aiops-ops-console",
+  "version": "1.0.0",
+  "description": "AIOps Operations Console - Grafana App Plugin for incident management, approvals, and actions",
+  "scripts": {
+    "build": "grafana-toolkit plugin:build",
+    "test": "grafana-toolkit plugin:test",
+    "dev": "grafana-toolkit plugin:dev",
+    "watch": "grafana-toolkit plugin:dev --watch"
+  },
+  "author": "AIOps NAAS Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@grafana/data": "^10.0.0",
+    "@grafana/runtime": "^10.0.0",
+    "@grafana/toolkit": "^10.0.0",
+    "@grafana/ui": "^10.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.11.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
