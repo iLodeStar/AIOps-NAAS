@@ -21,7 +21,38 @@ An AI-powered network observability and operations platform tailored for cruise 
 - **Comprehensive Testing**: 10-minute soak test suite for system validation and performance monitoring
 
 ## Architecture
-See docs/architecture.md for details, including a Mermaid diagram (all labels quoted) and a full component breakdown.
+
+**Quick Overview**: See [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) for a comprehensive guide to the platform architecture, services, and data flows.
+
+**Detailed Design**: See [docs/architecture.md](docs/architecture.md) for the complete edge+core architecture, including Mermaid diagrams and full component breakdown.
+
+### Sequential Event Processing Pipeline
+
+The platform implements a modular, sequential event processing pipeline with strict separation of concerns and AI/ML integration at each stage. See [Sequential Pipeline Architecture](docs/sequential-pipeline-architecture.md) for complete details.
+
+**Pipeline Flow:**
+```
+Vector → logs.anomalous → Anomaly Detection → anomaly.detected → 
+Benthos Enrichment → anomaly.detected.enriched → Enhanced Anomaly Detection → 
+anomaly.detected.enriched.final → Benthos Correlation → incidents.created → 
+Incident API → ClickHouse + REST API
+```
+
+**Key Design Principles:**
+- Each pipeline stage publishes to a unique NATS topic
+- Next stage listens ONLY to previous stage's output (no parallel processing)
+- Separate configuration files for each service
+- Complete AI/ML integration with LLM/Ollama for context-aware analysis
+- End-to-end traceability with tracking ID preservation
+- Production-ready with comprehensive error handling and fallback mechanisms
+
+**Service Ports:**
+- Benthos Enrichment: 4196 (Level 1 context enrichment)
+- Enhanced Anomaly Detection: 9082 (Advanced grouping with LLM)
+- Benthos Correlation: 4195 (Incident formation and deduplication)
+- Incident API: 9081 (Storage and REST API)
+
+**Verification:** Run `./scripts/verify_modular_pipeline.sh` to test end-to-end pipeline flow.
 
 ## Roadmap
 See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop automation.
@@ -30,8 +61,9 @@ See docs/roadmap.md for phased milestones from MVP to self-learning closed-loop 
 - Logs: Fluent Bit or Vector -> ClickHouse
 - Metrics: Prometheus -> VictoriaMetrics (edge), VictoriaMetrics/Mimir (core)
 - Traces (opt): OpenTelemetry -> Tempo/Jaeger
-- Bus/Processing: NATS JetStream; Benthos/Bytewax for correlation
-- LLM + RAG: Ollama + Qdrant + LangChain/LlamaIndex
+- Bus/Processing: NATS JetStream; Benthos/Bytewax for sequential event correlation
+- Event Processing: Modular sequential pipeline (see [Sequential Architecture](docs/sequential-pipeline-architecture.md))
+- LLM + RAG: Ollama + Qdrant + LangChain/LlamaIndex (integrated at each pipeline stage)
 - Automation: AWX + Nornir/Netmiko; OPA for policy
 - UI & Auth: Grafana OSS + custom Ops Console (React) + Keycloak
 - Deploy: k3s + Argo CD; Harbor registry cache (opt)

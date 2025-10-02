@@ -118,6 +118,25 @@ flowchart LR
 - Everything above is free and open source. Grafana OSS and Mimir are AGPLv3; ensure compliance if you modify/redistribute.
 - LLM models: prefer Apache-2 (Mistral/Mixtral/Qwen2). If you choose Llama 3.x, validate Meta's license for your use-case.
 
+## Event Processing Architecture
+
+The platform implements a **modular sequential event processing pipeline** with proper separation of concerns, AI/ML integration at each stage, and end-to-end traceability. For detailed implementation, see [Sequential Pipeline Architecture](sequential-pipeline-architecture.md).
+
+**Pipeline Stages:**
+1. **Vector** - Log ingestion and preprocessing → `logs.anomalous` (ERROR/WARNING logs)
+2. **Anomaly Detection Service** - Basic anomaly detection → `anomaly.detected`
+3. **Benthos Enrichment** - Level 1 context enrichment with LLM/Ollama → `anomaly.detected.enriched`
+4. **Enhanced Anomaly Detection** - Advanced grouping and analysis → `anomaly.detected.enriched.final`
+5. **Benthos Correlation** - Incident formation with deduplication → `incidents.created`
+6. **Incident API** - Storage (ClickHouse) and REST API exposure
+
+**Key Design Principles:**
+- Each stage has a unique NATS topic
+- Sequential processing (no parallel topic consumption)
+- Separate configuration files per service
+- AI/ML integration throughout with rule-based fallbacks
+- Complete tracking ID preservation for traceability
+
 ## Differences from the RAG-Driven NaaS Assistant
 - Adds offline-first streaming analytics, predictive RF models, and a control plane for safe automation.
 - Uses lightweight, fully OSS components suited to ship hardware and intermittent connectivity.
