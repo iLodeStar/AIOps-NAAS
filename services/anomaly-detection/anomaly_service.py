@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AIOps NAAS v0.2 - Anomaly Detection Service (Simplified)
+AIOps NAAS v0.2 - Anomaly Detection Service (V3 Refactored)
 
 This service implements streaming anomaly detection with basic algorithms:
 - Z-score anomaly detection  
@@ -12,10 +12,27 @@ The service:
 1. Queries metrics from VictoriaMetrics at regular intervals
 2. Applies anomaly detection algorithms 
 3. Publishes anomaly events to NATS JetStream for correlation
+
+V3 Changes:
+- Uses V3 Pydantic models from aiops_core (AnomalyDetected output)
+- Uses StructuredLogger for tracking_id propagation
+- Preserves tracking_id throughout all operations
+
+IMPORTANT - Model Usage Clarification:
+- Input: Raw JSON from Vector (logs.anomalous topic) - NOT LogMessage
+  Vector sends custom JSON with fields like 'anomaly_severity' that don't
+  match LogMessage schema. LogMessage is for logs.ingested topic only.
+  
+- Output: V3 AnomalyDetected model - published to anomaly.detected topic
+  All anomaly events use proper V3 Pydantic models with tracking_id.
+
+- LogEntry vs LogMessage: Issue #160 mentions "LogEntry" which is a typo.
+  LogEntry exists only in application-log-collector service (HTTP API input).
+  LogMessage is the V3 aiops_core model for logs.ingested topic.
+  This service correctly uses AnomalyDetected for output, raw JSON for input.
 """
 
 import asyncio
-import logging
 import json
 import time
 import re
@@ -31,16 +48,24 @@ import requests
 from nats.aio.client import Client as NATS
 from clickhouse_driver import Client as ClickHouseDriverClient
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# V3 imports from aiops_core
+from aiops_core.models import AnomalyDetected, LogMessage, Domain
+from aiops_core.utils import StructuredLogger, generate_tracking_id
+
+# Initialize V3 StructuredLogger
+logger = StructuredLogger(__name__)
 
 @dataclass
 class AnomalyEvent:
-    """Anomaly detection event"""
+    """
+    DEPRECATED: Use V3 AnomalyDetected model from aiops_core instead.
+    
+    Legacy dataclass maintained for backward compatibility during migration.
+    No runtime warnings are issued as this is internal code with no external
+    API consumers. The deprecation is clearly documented in docstrings.
+    
+    Migration path: Use AnomalyDetected directly or convert via to_v3_model().
+    """
     timestamp: datetime
     metric_name: str
     metric_value: float
@@ -50,6 +75,26 @@ class AnomalyEvent:
     threshold: float
     metadata: dict
     labels: dict
+    tracking_id: str = ""  # V3: Added tracking_id field
+    
+    def to_v3_model(self, ship_id: str, service: str, domain: Domain) -> AnomalyDetected:
+        """Convert legacy AnomalyEvent to V3 AnomalyDetected model"""
+        return AnomalyDetected(
+            tracking_id=self.tracking_id or generate_tracking_id(),
+            ts=self.timestamp,
+            ship_id=ship_id,
+            domain=domain,
+            anomaly_type=self.anomaly_type,
+            metric_name=self.metric_name,
+            metric_value=self.metric_value,
+            threshold=self.threshold,
+            score=self.anomaly_score,
+            detector=self.detector_name,
+            service=service,
+            device_id=self.metadata.get("device_id"),
+            raw_msg=self.metadata.get("log_message"),
+            meta=self.metadata
+        )
     
     def to_dict(self):
         return {
@@ -61,7 +106,8 @@ class AnomalyEvent:
             "detector_name": self.detector_name,
             "threshold": self.threshold,
             "metadata": self.metadata,
-            "labels": self.labels
+            "labels": self.labels,
+            "tracking_id": self.tracking_id
         }
 
 @dataclass
@@ -468,6 +514,9 @@ class AnomalyDetectionService:
     
     async def connect_nats(self):
         """Connect to NATS"""
+        tracking_id = generate_tracking_id()
+        logger.set_tracking_id(tracking_id)
+        
         try:
             self.nats_client = NATS()
             await self.nats_client.connect("nats://nats:4222")
@@ -480,68 +529,102 @@ class AnomalyDetectionService:
             self.health_status["nats_connected"] = True
                 
         except Exception as e:
-            logger.error(f"Failed to connect to NATS: {e}")
+            logger.error("Failed to connect to NATS", error=e)
             self.health_status["nats_connected"] = False
             # Don't raise, continue without NATS for now
     
     async def process_anomalous_log(self, msg):
-        """Process individual anomalous log messages from Vector"""
+        """
+        Process individual anomalous log messages from Vector using V3 models.
+        
+        ARCHITECTURAL NOTE - Raw JSON Parsing:
+        This method receives raw JSON from Vector via NATS topic 'logs.anomalous'.
+        Vector's output schema includes custom fields (anomaly_severity, etc.) that
+        don't match aiops_core.LogMessage schema. LogMessage is designed for the
+        'logs.ingested' topic from application-log-collector.
+        
+        Data Flow:
+          Syslog → Vector (transforms) → NATS (logs.anomalous) → Anomaly Detection
+                                              ↓ (raw JSON)
+                                   {message, level, host, tracking_id,
+                                    anomaly_severity, ...}
+        
+        Raw JSON parsing is intentional and architecturally correct for this service.
+        Adding Pydantic validation would require creating a new model matching
+        Vector's output schema, which would duplicate effort without adding value.
+        
+        Output: Creates V3 AnomalyDetected events published to 'anomaly.detected' topic.
+        """
+        tracking_id = None
         try:
+            # Parse raw JSON from Vector (not a V3 LogMessage object)
             log_data = json.loads(msg.data.decode())
-            print("TESTING THIS DATA",log_data)
-            # Extract tracking information from message
+            
+            # Extract tracking_id first for context
+            tracking_id = log_data.get('tracking_id') or generate_tracking_id()
+            logger.set_tracking_id(tracking_id)
+            
+            logger.debug("Processing anomalous log message", raw_data=str(log_data)[:200])
+            
+            # Extract message components
             message = log_data.get('message', '')
-            tracking_id = log_data.get('tracking_id')
             log_level = log_data.get('level', '').upper()
             anomaly_severity = log_data.get('anomaly_severity', 'low').lower()
             
             # CRITICAL FIX: Only process ERROR, CRITICAL, WARNING logs - skip INFO/DEBUG
             if log_level in ['INFO', 'DEBUG', 'TRACE'] and anomaly_severity in ['info', 'low', 'debug']:
-                print("ENTERED THIS BLOCK WITH", log_data, log_level, anomaly_severity)
-                logger.debug(f"Skipping non-critical log: level={log_level}, severity={anomaly_severity}, tracking_id={tracking_id}")
+                logger.debug("Skipping non-critical log", level=log_level, severity=anomaly_severity)
                 return
             
             # CRITICAL FIX: Additional filtering for normal operational messages
             if self._is_normal_operational_message(message):
-                print("ENTERED THAT BLOCK WITH", log_data, log_level, anomaly_severity, message)
-                logger.debug(f"Skipping normal operational message: {message[:50]}...")
+                logger.debug("Skipping normal operational message", message_preview=message[:50])
                 return
-            print("ENTERED AFTER BLOCK WITH", log_data, log_level, anomaly_severity, message)
+            
             # Log processing for tracking (only for actual anomalies)
-            logger.info(f"Processing anomalous log: tracking_id={tracking_id}, level={log_level}, severity={anomaly_severity}, message='{message[:100]}...'")
+            logger.info("Processing anomalous log", 
+                       level=log_level, 
+                       severity=anomaly_severity, 
+                       message_preview=message[:100])
             
             # CRITICAL FIX: Set appropriate anomaly score based on severity
             anomaly_score = self._calculate_anomaly_score(log_level, anomaly_severity)
             
-            # Create log-based anomaly event
-            event = AnomalyEvent(
-                timestamp=datetime.now(),
+            # Extract ship_id and device_id
+            ship_id = self._extract_ship_id(log_data)
+            device_id = self._extract_device_id(log_data)
+            service = log_data.get('service', 'unknown')
+            
+            # Create V3 AnomalyDetected event directly
+            anomaly = AnomalyDetected(
+                tracking_id=tracking_id,
+                ts=datetime.now(),
+                ship_id=ship_id,
+                domain=Domain.SYSTEM,  # Default to SYSTEM for log-based anomalies
+                anomaly_type="log_pattern",
                 metric_name="log_anomaly",
                 metric_value=1.0,  # Binary: anomaly detected or not
-                anomaly_score=anomaly_score,
-                anomaly_type="log_pattern",
-                detector_name="log_pattern_detector",
                 threshold=0.7,
-                metadata={
-                    "log_message": message,
-                    "tracking_id": tracking_id,
+                score=anomaly_score,
+                detector="log_pattern_detector",
+                service=service,
+                device_id=device_id,
+                raw_msg=message,
+                meta={
                     "log_level": log_level,
                     "source_host": log_data.get('host'),
-                    "service": log_data.get('service'),
                     "anomaly_severity": anomaly_severity,
                     "original_timestamp": log_data.get('timestamp'),
-                    # CRITICAL FIX: Add ship_id, device_id extraction
-                    "ship_id": self._extract_ship_id(log_data),
-                    "device_id": self._extract_device_id(log_data)
-                },
-                labels=log_data.get('labels', {})
+                }
             )
             
-            await self.publish_anomaly(event)
-            logger.info(f"Published log anomaly with tracking ID: {tracking_id}, score: {anomaly_score}")
+            await self.publish_anomaly_v3(anomaly)
+            logger.info("Published log anomaly", score=anomaly_score, ship_id=ship_id, device_id=device_id)
             
         except Exception as e:
-            logger.error(f"Error processing anomalous log: {e}")
+            if tracking_id:
+                logger.set_tracking_id(tracking_id)
+            logger.error("Error processing anomalous log", error=e)
     
     def _is_normal_operational_message(self, message: str) -> bool:
         """Check if message is a normal operational log that shouldn't create incidents"""
@@ -583,7 +666,9 @@ class AnomalyDetectionService:
         if host and host != 'unknown':
             registry_result = self.device_registry_client.lookup_hostname(host)
             if registry_result and registry_result.get('ship_id'):
-                logger.debug(f"Registry lookup success for host {host}: {registry_result['ship_id']}")
+                logger.debug("Registry lookup success for host", 
+                           host=host, 
+                           ship_id=registry_result['ship_id'])
                 return registry_result['ship_id']
         
         # Try device registry lookup using IP address from metadata
@@ -591,18 +676,20 @@ class AnomalyDetectionService:
         if source_host and source_host != host and source_host != 'unknown':
             registry_result = self.device_registry_client.lookup_hostname(source_host)
             if registry_result and registry_result.get('ship_id'):
-                logger.debug(f"Registry lookup success for source_host {source_host}: {registry_result['ship_id']}")
+                logger.debug("Registry lookup success for source_host", 
+                           source_host=source_host, 
+                           ship_id=registry_result['ship_id'])
                 return registry_result['ship_id']
         
         # Try to derive from hostname as fallback (existing logic)
         if host and '-' in host:
             # e.g., "ubuntu-system-01" -> "ubuntu-ship" 
             derived_ship = host.split('-')[0] + '-ship'
-            logger.debug(f"Derived ship_id from hostname {host}: {derived_ship}")
+            logger.debug("Derived ship_id from hostname", host=host, ship_id=derived_ship)
             return derived_ship
         elif host and host != 'unknown':
             derived_ship = host + '-ship'
-            logger.debug(f"Derived ship_id from hostname {host}: {derived_ship}")
+            logger.debug("Derived ship_id from hostname", host=host, ship_id=derived_ship)
             return derived_ship
         
         # Try labels as another fallback
@@ -610,7 +697,7 @@ class AnomalyDetectionService:
         if labels.get('ship_id'):
             return labels['ship_id']
         
-        logger.warning(f"Could not resolve ship_id for log data with host={host}, source_host={source_host}")
+        logger.warning("Could not resolve ship_id", host=host, source_host=source_host)
         return 'unknown-ship'
     
     def _extract_device_id(self, log_data: dict) -> str:
@@ -624,7 +711,9 @@ class AnomalyDetectionService:
         if host and host != 'unknown':
             registry_result = self.device_registry_client.lookup_hostname(host)
             if registry_result and registry_result.get('device_id'):
-                logger.debug(f"Registry device_id lookup success for host {host}: {registry_result['device_id']}")
+                logger.debug("Registry device_id lookup success for host", 
+                           host=host, 
+                           device_id=registry_result['device_id'])
                 return registry_result['device_id']
         
         # Try device registry lookup using IP address from metadata
@@ -632,40 +721,87 @@ class AnomalyDetectionService:
         if source_host and source_host != host and source_host != 'unknown':
             registry_result = self.device_registry_client.lookup_hostname(source_host)
             if registry_result and registry_result.get('device_id'):
-                logger.debug(f"Registry device_id lookup success for source_host {source_host}: {registry_result['device_id']}")
+                logger.debug("Registry device_id lookup success for source_host", 
+                           source_host=source_host, 
+                           device_id=registry_result['device_id'])
                 return registry_result['device_id']
         
         # Fallback to hostname if registry lookup failed
         if host and host != 'unknown':
-            logger.debug(f"Using hostname as device_id fallback: {host}")
+            logger.debug("Using hostname as device_id fallback", device_id=host)
             return host
         
         # Try service name
         service = log_data.get('service', '')
         if service and service != 'unknown':
-            logger.debug(f"Using service name as device_id fallback: {service}")
+            logger.debug("Using service name as device_id fallback", device_id=service)
             return service
         
-        logger.warning(f"Could not resolve device_id for log data with host={host}, source_host={source_host}")
+        logger.warning("Could not resolve device_id", host=host, source_host=source_host)
         return 'unknown-device'
     
+    async def publish_anomaly_v3(self, anomaly: AnomalyDetected):
+        """Publish V3 AnomalyDetected event to NATS"""
+        try:
+            if not self.nats_client or self.nats_client.is_closed:
+                logger.warning("NATS not connected, cannot publish anomaly", 
+                             tracking_id=anomaly.tracking_id)
+                return
+            
+            # Serialize using Pydantic's model_dump_json
+            event_json = anomaly.model_dump_json()
+            
+            # Publish to NATS using V3 topic structure
+            await self.nats_client.publish("anomaly.detected", event_json.encode())
+            
+            logger.info("Published V3 anomaly", 
+                       metric_name=anomaly.metric_name, 
+                       score=f"{anomaly.score:.3f}",
+                       tracking_id=anomaly.tracking_id)
+            
+        except Exception as e:
+            logger.error("Error publishing V3 anomaly event", 
+                        error=e, 
+                        tracking_id=anomaly.tracking_id)
+    
     async def publish_anomaly(self, event: AnomalyEvent):
-        """Publish anomaly event to NATS"""
+        """
+        DEPRECATED: Use publish_anomaly_v3() instead.
+        
+        Legacy method maintained for backward compatibility during V3 migration.
+        Converts AnomalyEvent to V3 AnomalyDetected model before publishing.
+        
+        No runtime warnings issued as this is internal code with no external
+        API consumers. Migration path is clearly documented.
+        """
         try:
             if not self.nats_client or self.nats_client.is_closed:
                 logger.warning("NATS not connected, cannot publish anomaly")
                 return
             
-            event_json = json.dumps(event.to_dict())
-            await self.nats_client.publish("anomaly.detected", event_json.encode())
-            logger.info(f"Published anomaly: {event.metric_name} = {event.anomaly_score:.3f}")
+            # Convert to V3 model if possible
+            ship_id = event.metadata.get("ship_id", "unknown-ship")
+            service = event.metadata.get("service", "unknown")
+            device_id = event.metadata.get("device_id")
+            
+            # Determine domain from metric name
+            domain = Domain.SYSTEM
+            if "network" in event.metric_name.lower():
+                domain = Domain.NET
+            elif "app" in event.metric_name.lower():
+                domain = Domain.APP
+            
+            v3_anomaly = event.to_v3_model(ship_id, service, domain)
+            await self.publish_anomaly_v3(v3_anomaly)
             
         except Exception as e:
-            logger.error(f"Error publishing anomaly event: {e}")
+            logger.error("Error publishing anomaly event", error=e)
     
     async def process_metrics(self):
-        """Process metrics with historical baseline analysis"""
-        logger.info("Processing metrics for anomaly detection...")
+        """Process metrics with historical baseline analysis using V3 models"""
+        tracking_id = generate_tracking_id()
+        logger.set_tracking_id(tracking_id)
+        logger.info("Processing metrics for anomaly detection")
         
         for metric_query in self.metric_queries:
             if not metric_query.enabled:
@@ -706,16 +842,33 @@ class AnomalyDetectionService:
                         
                         resolution_history = self.clickhouse_client.get_incident_resolution_history(metric_query.name)
                         
-                        # Create enhanced anomaly event
-                        event = AnomalyEvent(
-                            timestamp=datetime.now(),
+                        # Extract ship_id and device_id from labels
+                        ship_id = metric_labels.get('ship_id') or metric_labels.get('instance', 'unknown-ship')
+                        device_id = metric_labels.get('device_id') or metric_labels.get('instance', 'unknown-device')
+                        service = metric_labels.get('job', 'unknown')
+                        
+                        # Determine domain from metric name
+                        domain = Domain.SYSTEM
+                        if "network" in metric_query.name.lower() or "interface" in metric_query.name.lower():
+                            domain = Domain.NET
+                        elif "app" in metric_query.name.lower():
+                            domain = Domain.APP
+                        
+                        # Create V3 AnomalyDetected event
+                        anomaly = AnomalyDetected(
+                            tracking_id=tracking_id,
+                            ts=datetime.now(),
+                            ship_id=ship_id,
+                            domain=domain,
+                            anomaly_type="statistical_with_baseline",
                             metric_name=metric_query.name,
                             metric_value=value,
-                            anomaly_score=combined_score,
-                            anomaly_type="statistical_with_baseline",
-                            detector_name="enhanced_detector",
                             threshold=metric_query.threshold,
-                            metadata={
+                            score=combined_score,
+                            detector="enhanced_detector",
+                            service=service,
+                            device_id=device_id,
+                            meta={
                                 "query": metric_query.query,
                                 "vm_timestamp": result['timestamp'],
                                 "statistical_scores": scores,
@@ -725,18 +878,26 @@ class AnomalyDetectionService:
                                 "correlation_patterns_count": len(correlation_patterns),
                                 "resolution_history_count": len(resolution_history),
                                 "similar_incidents": resolution_history[:3]  # Top 3 similar incidents
-                            },
-                            labels=metric_labels
+                            }
                         )
                         
-                        await self.publish_anomaly(event)
-                        logger.info(f"Published enhanced anomaly: {metric_query.name} = {combined_score:.3f} (statistical: {max_statistical_score:.3f}, historical: {historical_anomaly_score:.3f})")
+                        await self.publish_anomaly_v3(anomaly)
+                        logger.info("Published enhanced anomaly", 
+                                   metric_name=metric_query.name,
+                                   combined_score=f"{combined_score:.3f}",
+                                   statistical=f"{max_statistical_score:.3f}",
+                                   historical=f"{historical_anomaly_score:.3f}")
                         
             except Exception as e:
-                logger.error(f"Error processing metric {metric_query.name}: {e}")
+                logger.error("Error processing metric", 
+                           metric_name=metric_query.name, 
+                           error=e)
     
     async def health_check_loop(self):
         """Periodic health check loop with ClickHouse and Device Registry"""
+        tracking_id = generate_tracking_id()
+        logger.set_tracking_id(tracking_id)
+        
         while True:
             try:
                 vm_healthy = self.vm_client.health_check()
@@ -750,7 +911,11 @@ class AnomalyDetectionService:
                 self.health_status["nats_connected"] = nats_healthy
                 self.health_status["healthy"] = vm_healthy and clickhouse_healthy and nats_healthy and registry_healthy
                 
-                logger.info(f"Health check - VM: {vm_healthy}, ClickHouse: {clickhouse_healthy}, Registry: {registry_healthy}, NATS: {nats_healthy}")
+                logger.info("Health check", 
+                          vm=vm_healthy, 
+                          clickhouse=clickhouse_healthy, 
+                          registry=registry_healthy, 
+                          nats=nats_healthy)
                 
                 if not vm_healthy:
                     logger.warning("VictoriaMetrics is not healthy")
@@ -764,12 +929,14 @@ class AnomalyDetectionService:
                 await asyncio.sleep(30)  # Check every 30 seconds
                 
             except Exception as e:
-                logger.error(f"Health check error: {e}")
+                logger.error("Health check error", error=e)
                 await asyncio.sleep(30)
     
     async def detection_loop(self):
         """Main anomaly detection loop"""
-        logger.info("Starting anomaly detection loop...")
+        tracking_id = generate_tracking_id()
+        logger.set_tracking_id(tracking_id)
+        logger.info("Starting anomaly detection loop")
         
         while True:
             try:
@@ -777,19 +944,21 @@ class AnomalyDetectionService:
                 await asyncio.sleep(10)  # Process every 10 seconds
                 
             except Exception as e:
-                logger.error(f"Error in detection loop: {e}")
+                logger.error("Error in detection loop", error=e)
                 await asyncio.sleep(10)
     
     async def run_background_tasks(self):
         """Run background detection and health check tasks"""
-        logger.info("Starting AIOps NAAS Anomaly Detection Service v0.2")
+        tracking_id = generate_tracking_id()
+        logger.set_tracking_id(tracking_id)
+        logger.info("Starting AIOps NAAS Anomaly Detection Service v0.2 (V3)")
         
         # Connect to NATS
         await self.connect_nats()
         
         # Wait for VictoriaMetrics to be ready
         while not self.vm_client.health_check():
-            logger.info("Waiting for VictoriaMetrics to be ready...")
+            logger.info("Waiting for VictoriaMetrics to be ready")
             await asyncio.sleep(5)
         
         self.health_status["vm_connected"] = True
@@ -820,6 +989,9 @@ async def metrics():
 
 async def main():
     """Main entry point"""
+    tracking_id = generate_tracking_id()
+    logger.set_tracking_id(tracking_id)
+    
     # Start background detection tasks
     background_task = asyncio.create_task(service.run_background_tasks())
     
@@ -834,7 +1006,7 @@ async def main():
         if service.nats_client:
             await service.nats_client.close()
     except Exception as e:
-        logger.error(f"Service error: {e}")
+        logger.error("Service error", error=e)
         raise
 
 if __name__ == "__main__":
