@@ -1,0 +1,31 @@
+# Retention Policy - Version 3.0
+
+# Data retention periods
+logs_days: 5  # Raw logs in ClickHouse
+metrics_days: 5  # Raw metrics in VictoriaMetrics  
+incidents_days: 30  # Incident metadata
+summaries_days: 15  # Top errors and summaries
+runbooks_days: 365  # Keep runbooks long-term
+llm_cache_minutes: 45  # LLM response cache
+
+# Downsampling (optional, if disk allows)
+downsampling:
+  enabled: false
+  rules:
+    - resolution: 1m  # 1-minute aggregates
+      retention_days: 15
+    - resolution: 5m  # 5-minute aggregates
+      retention_days: 30
+    - resolution: 1h  # 1-hour aggregates
+      retention_days: 90
+
+# Disk watermarks
+disk_watermarks:
+  high_pct: 85  # Start cleanup at 85%
+  critical_pct: 95  # Aggressive cleanup at 95%
+  cleanup_batch_size: 1000  # Delete in batches
+
+# Compression
+compression:
+  logs: ZSTD  # Use ZSTD for logs (better compression)
+  metrics: LZ4  # Use LZ4 for metrics (faster)

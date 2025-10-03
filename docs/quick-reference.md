@@ -34,6 +34,10 @@ curl "http://localhost:8081/incidents" | jq .
 | **NATS Monitor** | http://localhost:8222 | Message Bus Status |
 | **Alertmanager** | http://localhost:9093 | Alert Management |
 | **MailHog** | http://localhost:8025 | Email Testing |
+| **Benthos Enrichment** | http://localhost:4196/ping | L1 Context Enrichment |
+| **Enhanced Anomaly** | http://localhost:9082/health | L2 Anomaly Analysis |
+| **Benthos Correlation** | http://localhost:4195/ping | Incident Formation |
+| **Incident API** | http://localhost:9081/health | Incident REST API |
 
 **Default Login**: admin/admin (or values from .env)
 
@@ -43,13 +47,17 @@ curl "http://localhost:8081/incidents" | jq .
 - **Auto-collected**: CPU, Memory, Disk, Network metrics from Ubuntu
 - **Verification**: `curl localhost:8428/api/v1/query?query=up`
 
-### 2. Data Tracing ✅  
-- **Path**: System → Node Exporter → VMAgent → VictoriaMetrics → Anomaly Detection → NATS → Benthos → Incident API
-- **Verification**: All services show "healthy" in `docker compose ps`
+### 2. Sequential Event Processing Pipeline ✅  
+- **Architecture**: See [Sequential Pipeline Architecture](sequential-pipeline-architecture.md)
+- **Flow**: Vector → Anomaly Detection → Benthos Enrichment → Enhanced Detection → Benthos Correlation → Incident API
+- **NATS Topics**: `logs.anomalous` → `anomaly.detected` → `anomaly.detected.enriched` → `anomaly.detected.enriched.final` → `incidents.created`
+- **Service Ports**: Enrichment:4196, Enhanced:9082, Correlation:4195, Incident:9081
+- **Verification**: `./scripts/verify_modular_pipeline.sh`
 
 ### 3. Data Correlation ✅
-- **Process**: Benthos correlates related anomalies within time windows
-- **Verification**: `curl localhost:8081/incidents` (after running test anomalies)
+- **Process**: Benthos correlates related anomalies with LLM-enhanced analysis
+- **Features**: Deduplication, suppression, cross-system correlation
+- **Verification**: `curl localhost:9081/api/v1/incidents` (note: port 9081, not 8081)
 
 ### 4. Configurable Anomalies ✅
 - **Types**: CPU (70%), Memory (60%), Disk (80%), Network

@@ -1,0 +1,74 @@
+# Detection Policy - Version 3.0
+
+# Static thresholds for common metrics
+thresholds:
+  cpu_pct_high:
+    value: 85.0
+    duration_sec: 120  # Must exceed for 2 minutes
+    severity: medium
+  mem_pct_high:
+    value: 90.0
+    duration_sec: 120
+    severity: high
+  disk_pct_high:
+    value: 85.0
+    duration_sec: 600  # 10 minutes
+    severity: high
+  rf_snr_min:  # RF Signal-to-Noise Ratio
+    value: 7.0
+    duration_sec: 60
+    severity: critical
+  link_latency_ms:
+    value: 500.0
+    duration_sec: 180
+    severity: medium
+  packet_loss_pct:
+    value: 5.0
+    duration_sec: 120
+    severity: high
+
+# Statistical anomaly detection (EWMA/MAD)
+stats:
+  ewma:
+    window_sec: 300  # 5 minute window
+    sigma: 3.0  # 3-sigma threshold
+    min_samples: 10  # Require minimum samples before detecting
+  mad:  # Median Absolute Deviation
+    window_sec: 600
+    threshold: 3.5
+    min_samples: 20
+
+# Log pattern detection
+logs_patterns:
+  - name: db_conn_timeout
+    match: "connection timeout"
+    severity_hint: high
+    incident_type: resource_pressure
+  - name: auth_failure
+    match: "authentication failed|invalid credentials"
+    severity_hint: medium
+    incident_type: auth_failure
+  - name: link_down
+    match: "link down|carrier lost|no signal"
+    severity_hint: critical
+    incident_type: link_degradation
+  - name: disk_full
+    match: "no space left|disk full"
+    severity_hint: high
+    incident_type: resource_pressure
+  - name: oom_killed
+    match: "out of memory|OOM killer"
+    severity_hint: critical
+    incident_type: resource_pressure
+
+# Detector configuration
+detectors:
+  threshold:
+    enabled: true
+    check_interval_sec: 30
+  ewma:
+    enabled: true
+    check_interval_sec: 60
+  pattern:
+    enabled: true
+    check_interval_sec: 10  # Fast for logs

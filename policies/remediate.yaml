@@ -1,0 +1,52 @@
+# Remediation Policy - Version 3.0
+
+# Allowed automated actions (allowlist)
+allowed_actions:
+  - restart_service
+  - rotate_logs
+  - failover_path
+  - clear_cache
+  - reset_connection
+
+# Human-in-the-loop settings
+human_in_the_loop_default: true  # Require approval by default
+auto_approve_for:  # Actions that don't need approval
+  - restart_service  # Low risk
+  - rotate_logs  # Low risk
+
+# Two-person approval requirements
+two_person_approval_for:
+  - network_changes
+  - firewall_policies
+  - failover_path  # Network path changes
+  - reboot_device
+
+# Action-specific configurations
+actions:
+  restart_service:
+    risk: low
+    cooldown_sec: 300  # 5 minutes
+    max_retries: 2
+    timeout_sec: 60
+  rotate_logs:
+    risk: low
+    cooldown_sec: 600  # 10 minutes
+  failover_path:
+    risk: medium
+    cooldown_sec: 1800  # 30 minutes
+    requires_pre_check: true
+    requires_post_check: true
+
+# Maintenance windows (no auto-remediation during)
+maintenance_windows:
+  - name: weekly_maintenance
+    day: Sunday
+    start: "02:00"
+    end: "04:00"
+    timezone: "UTC"
+
+# Rollback settings
+rollback:
+  enabled: true
+  auto_rollback_on_failure: true
+  rollback_timeout_sec: 120

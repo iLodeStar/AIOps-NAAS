@@ -1,0 +1,47 @@
+# Notification Policy - Version 3.0
+
+channels:
+  email:
+    enabled: true
+    rate_limit_per_min: 10  # Max 10 emails per minute
+    digest_mode_on_storm: true  # Switch to digest during storms
+    digest_interval_min: 15
+    recipients:
+      critical: ["sre-oncall@cruise.com"]
+      high: ["sre-oncall@cruise.com", "engineering@cruise.com"]
+      medium: ["engineering@cruise.com"]
+      low: []  # Don't email for low severity
+  
+  webhook:
+    enabled: true
+    url: "${WEBHOOK_URL}"  # From environment
+    timeout_sec: 5
+    retries: 2
+    
+  pagerduty:
+    enabled: false
+    integration_key: "${PAGERDUTY_KEY}"
+    severity_mapping:
+      critical: critical
+      high: error
+      medium: warning
+      low: info
+
+# Quiet hours (reduce noise during off-hours)
+quiet_hours:
+  enabled: true
+  start: "22:00"  # 10 PM
+  end: "06:00"  # 6 AM
+  timezone: "UTC"
+  min_severity: high  # Only critical/high during quiet hours
+
+# Storm detection
+storm_detection:
+  threshold_per_min: 20  # 20+ incidents/min = storm
+  window_min: 5
+  cooldown_min: 30  # Stay in storm mode for 30min after
+
+# Notification templates
+templates:
+  incident_created: "New {severity} incident: {incident_type} on {ship_id}"
+  incident_resolved: "Resolved: {incident_type} on {ship_id}"

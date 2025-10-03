@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/master/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "AIOps Operations Console",
+  "id": "aiops-ops-console",
+  "info": {
+    "description": "Operations Console for AIOps-NAAS: Incident management, approvals, safe actions, and policy viewing",
+    "author": {
+      "name": "AIOps NAAS Team"
+    },
+    "keywords": ["aiops", "incidents", "operations", "monitoring"],
+    "version": "1.0.0",
+    "updated": "2025-10-02"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Incidents",
+      "path": "/a/aiops-ops-console/incidents",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": true
+    },
+    {
+      "type": "page",
+      "name": "Approvals",
+      "path": "/a/aiops-ops-console/approvals",
+      "role": "Editor",
+      "addToNav": true
+    },
+    {
+      "type": "page",
+      "name": "Actions",
+      "path": "/a/aiops-ops-console/actions",
+      "role": "Editor",
+      "addToNav": true
+    },
+    {
+      "type": "page",
+      "name": "Policy",
+      "path": "/a/aiops-ops-console/policy",
+      "role": "Viewer",
+      "addToNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=10.0.0",
+    "plugins": []
+  }
+}

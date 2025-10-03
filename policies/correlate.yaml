@@ -1,0 +1,31 @@
+# Correlation Policy - Version 3.0
+
+# Time windows for correlating events by type
+window_sec_by_type:
+  link_degradation: 600  # 10 minutes
+  resource_pressure: 300  # 5 minutes
+  auth_failure: 600  # 10 minutes
+  comms_outage: 1200  # 20 minutes
+  app_degradation: 600  # 10 minutes
+  network_issue: 900  # 15 minutes
+  security_alert: 300  # 5 minutes
+
+# Deduplication settings
+dedup_ttl_sec: 900  # 15 minutes - how long to remember seen events
+suppression_ttl_sec: 1800  # 30 minutes - how long to suppress duplicates
+
+# Severity mapping (incident type → severity override)
+severity_map:
+  safety: critical  # Safety incidents always critical
+  comms_outage: critical  # Full comms loss is critical
+  core_app_degradation: high
+  link_degradation: high
+  resource_pressure: medium
+  guest_network_issue: medium
+  auth_failure: low
+  security_alert: high
+
+# Incident creation thresholds
+min_events_for_incident: 1  # Create incident from single anomaly
+max_events_per_incident: 50  # Cap evidence size
+correlation_timeout_sec: 30  # Max time to wait for related events

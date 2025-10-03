@@ -1,0 +1,25 @@
+# Privacy Policy - Version 3.0
+
+# PII redaction
+redact_pii: true
+pii_patterns:
+  - email_addresses
+  - credit_cards
+  - phone_numbers
+  - ssn
+  - ip_addresses_guest  # Redact guest WiFi IPs only
+
+# Data sharing with shore
+shore_sync:
+  raw_logs: false  # Never send raw logs
+  incidents: true  # Send incident metadata
+  summaries: true  # Send aggregated summaries
+  metrics: true  # Send metrics (no PII)
+
+# Anonymization
+anonymize_guest_data: true
+retention_after_anonymization_days: 90
+
+# Access controls
+access_logging: true
+log_data_access: true
