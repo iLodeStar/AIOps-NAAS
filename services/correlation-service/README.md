@@ -35,6 +35,7 @@ Enriched Anomaly → Time Window → Threshold Check → Deduplication → Incid
 - **Fingerprint-based**: Uses ship_id, domain, service, anomaly_type, device_id, severity
 - **TTL-based cache**: Configurable suppression window (default: 900 seconds)
 - **Statistics tracking**: Monitors duplicate detection rate
+- **Note**: Uses MD5 for fingerprinting (non-cryptographic use case)
 
 ### Time Windowing (`windowing.py`)
 - **Configurable windows** by domain:
@@ -47,10 +48,11 @@ Enriched Anomaly → Time Window → Threshold Check → Deduplication → Incid
 - **Automatic cleanup**: Removes expired windows
 - **Per-ship/domain isolation**: Separate windows for each ship and domain combination
 
-### Performance Tracking
-- **Latency metrics**: Tracks p50, p95, p99 processing latency
-- **Throughput stats**: Monitors processed anomalies, created incidents, suppressed duplicates
-- **Error tracking**: Captures and reports processing errors
+### Reliability Features
+- **NATS publish retry**: Exponential backoff with 3 retry attempts
+- **Graceful error handling**: Comprehensive exception handling with structured logging
+- **Memory bounds**: Automatic size limits on latency tracking (collections.deque)
+- **Health monitoring**: Self-reporting health checks and metrics
 
 ## Configuration
 
@@ -160,9 +162,13 @@ Legacy stats endpoint for backward compatibility.
 ## Deployment
 
 ### Docker
+
+**Important**: Build from the repository root to include aiops_core dependency:
+
 ```bash
-# Build
-docker build -t correlation-service:v3 .
+# Build from repository root
+cd /path/to/AIOps-NAAS
+docker build -f services/correlation-service/Dockerfile -t correlation-service:v3 .
 
 # Run
 docker run -d \

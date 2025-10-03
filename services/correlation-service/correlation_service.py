@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-from collections import defaultdict
+from collections import defaultdict, deque
 from fastapi import FastAPI
 from pydantic import ValidationError
 import uvicorn
@@ -70,9 +70,8 @@ class CorrelationService:
         self.dedup_cache = DeduplicationCache(ttl_seconds=DEDUP_TTL)
         self.window_manager = TimeWindowManager(correlation_threshold=CORRELATION_THRESHOLD)
         
-        # Performance tracking
-        self.latency_samples = []  # Track last 1000 samples for p99
-        self.max_samples = 1000
+        # Performance tracking - use deque for automatic bounds
+        self.latency_samples = deque(maxlen=1000)  # Automatically maintains max size
         
         # Statistics
         self.stats = {
@@ -94,11 +93,7 @@ class CorrelationService:
         """Track processing latency for metrics"""
         self.latency_samples.append(latency_ms)
         
-        # Keep only last N samples
-        if len(self.latency_samples) > self.max_samples:
-            self.latency_samples = self.latency_samples[-self.max_samples:]
-        
-        # Update average
+        # Update average (deque automatically maintains max size)
         if self.latency_samples:
             self.stats["avg_latency_ms"] = sum(self.latency_samples) / len(self.latency_samples)
     
@@ -148,11 +143,8 @@ class CorrelationService:
                 # Not a duplicate - create incident
                 incident = await self._create_incident(enriched, anomalies, suppress_key)
                 
-                # Publish incident to NATS
-                await self.nats.publish(
-                    NATS_OUTPUT, 
-                    incident.model_dump_json().encode()
-                )
+                # Publish incident to NATS with retry logic
+                await self._publish_incident(incident)
                 
                 self.stats["incidents_created"] += 1
                 
@@ -183,6 +175,55 @@ class CorrelationService:
             latency_ms = (time.time() - start_time) * 1000
             self._track_latency(latency_ms)
             self.stats["last_processing_time_ms"] = latency_ms
+    
+    async def _publish_incident(self, incident: IncidentCreated, max_retries: int = 3):
+        """
+        Publish incident to NATS with exponential backoff retry
+        
+        Args:
+            incident: Incident to publish
+            max_retries: Maximum number of retry attempts (default: 3)
+            
+        Raises:
+            Exception: If all retries exhausted
+        """
+        for attempt in range(max_retries):
+            try:
+                await self.nats.publish(
+                    NATS_OUTPUT, 
+                    incident.model_dump_json().encode()
+                )
+                
+                if attempt > 0:
+                    logger.info(
+                        "Incident published after retry",
+                        incident_id=incident.incident_id,
+                        attempt=attempt + 1
+                    )
+                
+                return  # Success
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.1s, 0.2s, 0.4s
+                    backoff_seconds = 0.1 * (2 ** attempt)
+                    logger.warning(
+                        f"NATS publish failed, retrying in {backoff_seconds}s",
+                        incident_id=incident.incident_id,
+                        attempt=attempt + 1,
+                        error=str(e)
+                    )
+                    await asyncio.sleep(backoff_seconds)
+                else:
+                    # All retries exhausted
+                    logger.error(
+                        "NATS publish failed after all retries",
+                        incident_id=incident.incident_id,
+                        max_retries=max_retries,
+                        error=str(e)
+                    )
+                    self.stats["errors"] += 1
+                    raise
             
     async def _create_incident(
         self, 

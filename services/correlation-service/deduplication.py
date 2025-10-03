@@ -40,11 +40,15 @@ class DeduplicationCache:
         """
         Compute fingerprint for anomaly based on key attributes
         
+        Uses MD5 hash for fingerprinting (not cryptographic security).
+        MD5 is acceptable here as we're using it for deduplication,
+        not security. Collision resistance is sufficient for this use case.
+        
         Args:
             anomaly: Enriched anomaly event
             
         Returns:
-            Fingerprint hash string
+            Fingerprint hash string (16 chars)
         """
         # Create fingerprint from: ship_id, domain, service, anomaly_type
         # This ensures similar anomalies are grouped together
