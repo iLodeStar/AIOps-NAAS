@@ -124,23 +124,28 @@ class CorrelationService:
         start_time = time.time()
         
         try:
-            # Step 1: Check for deduplication
-            should_suppress, suppress_key = self.dedup_cache.should_suppress(enriched)
-            
-            if should_suppress:
-                self.stats["duplicates_suppressed"] += 1
-                logger.info(
-                    "Suppressed duplicate anomaly",
-                    tracking_id=enriched.tracking_id,
-                    suppress_key=suppress_key
-                )
-                return False
-            
-            # Step 2: Add to time window
+            # Step 1: Add to time window (no dedup check - let anomalies correlate)
             anomalies = self.window_manager.add_anomaly(enriched)
             
-            # Step 3: Create incident if window threshold reached
+            # Step 2: If window threshold reached, check deduplication before creating incident
             if anomalies:
+                # Compute suppress key for this potential incident
+                suppress_key = self.dedup_cache.compute_suppress_key(enriched)
+                
+                # Check if we've recently created an incident with this signature
+                should_suppress, _ = self.dedup_cache.should_suppress(enriched)
+                
+                if should_suppress:
+                    self.stats["duplicates_suppressed"] += 1
+                    logger.info(
+                        "Suppressed duplicate incident",
+                        tracking_id=enriched.tracking_id,
+                        suppress_key=suppress_key,
+                        anomaly_count=len(anomalies)
+                    )
+                    return False
+                
+                # Not a duplicate - create incident
                 incident = await self._create_incident(enriched, anomalies, suppress_key)
                 
                 # Publish incident to NATS

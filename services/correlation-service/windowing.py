@@ -70,8 +70,8 @@ class AnomalyWindow:
         self.last_updated = time.time()
     
     def get_anomalies(self) -> List[Dict]:
-        """Get all anomalies in window"""
-        return self.anomalies
+        """Get all anomalies in window (returns a copy)"""
+        return self.anomalies.copy()
     
     def get_count(self) -> int:
         """Get number of anomalies in window"""
