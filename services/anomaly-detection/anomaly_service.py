@@ -14,9 +14,22 @@ The service:
 3. Publishes anomaly events to NATS JetStream for correlation
 
 V3 Changes:
-- Uses V3 Pydantic models from aiops_core (LogMessage, AnomalyDetected)
+- Uses V3 Pydantic models from aiops_core (AnomalyDetected output)
 - Uses StructuredLogger for tracking_id propagation
 - Preserves tracking_id throughout all operations
+
+IMPORTANT - Model Usage Clarification:
+- Input: Raw JSON from Vector (logs.anomalous topic) - NOT LogMessage
+  Vector sends custom JSON with fields like 'anomaly_severity' that don't
+  match LogMessage schema. LogMessage is for logs.ingested topic only.
+  
+- Output: V3 AnomalyDetected model - published to anomaly.detected topic
+  All anomaly events use proper V3 Pydantic models with tracking_id.
+
+- LogEntry vs LogMessage: Issue #160 mentions "LogEntry" which is a typo.
+  LogEntry exists only in application-log-collector service (HTTP API input).
+  LogMessage is the V3 aiops_core model for logs.ingested topic.
+  This service correctly uses AnomalyDetected for output, raw JSON for input.
 """
 
 import asyncio
@@ -44,7 +57,15 @@ logger = StructuredLogger(__name__)
 
 @dataclass
 class AnomalyEvent:
-    """Anomaly detection event - DEPRECATED: Use V3 AnomalyDetected model instead"""
+    """
+    DEPRECATED: Use V3 AnomalyDetected model from aiops_core instead.
+    
+    Legacy dataclass maintained for backward compatibility during migration.
+    No runtime warnings are issued as this is internal code with no external
+    API consumers. The deprecation is clearly documented in docstrings.
+    
+    Migration path: Use AnomalyDetected directly or convert via to_v3_model().
+    """
     timestamp: datetime
     metric_name: str
     metric_value: float
@@ -513,9 +534,30 @@ class AnomalyDetectionService:
             # Don't raise, continue without NATS for now
     
     async def process_anomalous_log(self, msg):
-        """Process individual anomalous log messages from Vector using V3 models"""
+        """
+        Process individual anomalous log messages from Vector using V3 models.
+        
+        ARCHITECTURAL NOTE - Raw JSON Parsing:
+        This method receives raw JSON from Vector via NATS topic 'logs.anomalous'.
+        Vector's output schema includes custom fields (anomaly_severity, etc.) that
+        don't match aiops_core.LogMessage schema. LogMessage is designed for the
+        'logs.ingested' topic from application-log-collector.
+        
+        Data Flow:
+          Syslog → Vector (transforms) → NATS (logs.anomalous) → Anomaly Detection
+                                              ↓ (raw JSON)
+                                   {message, level, host, tracking_id,
+                                    anomaly_severity, ...}
+        
+        Raw JSON parsing is intentional and architecturally correct for this service.
+        Adding Pydantic validation would require creating a new model matching
+        Vector's output schema, which would duplicate effort without adding value.
+        
+        Output: Creates V3 AnomalyDetected events published to 'anomaly.detected' topic.
+        """
         tracking_id = None
         try:
+            # Parse raw JSON from Vector (not a V3 LogMessage object)
             log_data = json.loads(msg.data.decode())
             
             # Extract tracking_id first for context
@@ -723,7 +765,15 @@ class AnomalyDetectionService:
                         tracking_id=anomaly.tracking_id)
     
     async def publish_anomaly(self, event: AnomalyEvent):
-        """Publish anomaly event to NATS - DEPRECATED: Use publish_anomaly_v3"""
+        """
+        DEPRECATED: Use publish_anomaly_v3() instead.
+        
+        Legacy method maintained for backward compatibility during V3 migration.
+        Converts AnomalyEvent to V3 AnomalyDetected model before publishing.
+        
+        No runtime warnings issued as this is internal code with no external
+        API consumers. Migration path is clearly documented.
+        """
         try:
             if not self.nats_client or self.nats_client.is_closed:
                 logger.warning("NATS not connected, cannot publish anomaly")
