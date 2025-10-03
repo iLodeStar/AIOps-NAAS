@@ -1,20 +1,28 @@
-## Objective
-Configure Vector to generate UUIDv4 tracking_id for all incoming logs at ingestion point.
+## Task
+Configure Vector to generate tracking_id for all logs.
 
-## File to Modify
-`vector/vector.toml`
+## Changes to `vector/vector.toml`
+
+```toml
+[transforms.add_tracking_id]
+type = "remap"
+inputs = ["syslog"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = now()
+'''
+
+[sinks.to_clickhouse]
+inputs = ["add_tracking_id"]  # Changed from ["syslog"]
+
+[sinks.to_nats_anomaly]
+inputs = ["add_tracking_id"]  # Changed from ["syslog"]
+```
 
 ## Acceptance Criteria
-- [ ] tracking_id generated for all incoming logs
-- [ ] UUIDv4 format validated
+- [ ] tracking_id generated (UUIDv4)
 - [ ] ingestion_timestamp added
 - [ ] ClickHouse stores tracking_id
 - [ ] NATS messages include tracking_id
-- [ ] No performance degradation (latency <5ms added)
 
-## Dependencies
-- None (independent configuration change)
-
-**Estimated Effort**: 30 minutes  
-**Sprint**: 3 (Week 3)  
-**Priority**: Medium
+**Effort**: 30m | **Priority**: Medium | **Dependencies**: None

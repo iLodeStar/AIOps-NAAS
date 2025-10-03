@@ -1,33 +1,39 @@
-## Objective
-Create llm-enricher service for Insight Path AI enrichment using Ollama LLM and Qdrant RAG.
+## Task
+Create `services/llm-enricher/` for AI-based incident insights.
 
-## Service Purpose
-Subscribe to `incidents.created`, generate AI insights, retrieve similar incidents, publish enhanced incidents.
+## Implementation
 
-## Core Functionality
-- Root cause analysis (Ollama phi3:mini)
-- Similar incidents (Qdrant RAG)
-- Remediation suggestions
-- Impact prediction
-- LLM response caching in ClickHouse
-- Target latency: <300ms (with timeout fallback)
+```python
+from aiops_core.models import Incident, EnrichedIncident
+from aiops_core.utils import StructuredLogger
+
+# Subscribe: incidents.created
+# Generate AI insights:
+#   - Root cause (Ollama phi3:mini)
+#   - Similar incidents (Qdrant RAG)
+#   - Remediation suggestions
+# Cache responses in ClickHouse
+# Publish: incidents.enriched
+# Target: <300ms with timeout fallback
+```
+
+## Structure
+```
+services/llm-enricher/
+├── llm_service.py      # Main service
+├── ollama_client.py    # LLM integration
+├── qdrant_rag.py       # RAG search
+├── llm_cache.py        # ClickHouse cache
+└── Dockerfile
+```
 
 ## Acceptance Criteria
-- [ ] Service subscribes to `incidents.created` NATS topic
-- [ ] Ollama integration functional with phi3:mini model
+- [ ] Subscribes to `incidents.created`
+- [ ] Ollama integration works (phi3:mini)
 - [ ] Qdrant RAG retrieves similar incidents
-- [ ] LLM responses cached in ClickHouse
-- [ ] Publishes `EnrichedIncident` to `incidents.enriched`
-- [ ] Timeout fallback (graceful degradation)
-- [ ] Latency <300ms target (99th percentile)
-- [ ] Health endpoint and metrics
-- [ ] Unit tests with mocked LLM/RAG
+- [ ] Responses cached in ClickHouse
+- [ ] Publishes to `incidents.enriched`
+- [ ] Timeout fallback functional
+- [ ] Latency <300ms (p99)
 
-## Dependencies
-- Issue #6 (Ollama service)
-- Issue #7 (Qdrant service)
-- Issues #1-4 (Fast Path operational)
-
-**Estimated Effort**: 4-5 hours  
-**Sprint**: 2 (Week 2)  
-**Priority**: High
+**Effort**: 4-5h | **Priority**: High | **Dependencies**: #6, #7, #1-4

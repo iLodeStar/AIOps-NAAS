@@ -1,21 +1,33 @@
-## Objective
-Configure VMAlert for monitoring Fast Path (<100ms) and Insight Path (<5s) SLO compliance.
+## Task
+Configure VMAlert for SLO monitoring.
 
-## Required Configuration
-- Fast Path SLO alerts (latency, error rate)
-- Insight Path SLO alerts (latency, service health)
-- VMAlert service in docker-compose
+## Implementation
+
+1. **Create** `vmalert/alerts.yml`:
+```yaml
+groups:
+  - name: fast_path_slo
+    rules:
+      - alert: FastPathLatencyHigh
+        expr: histogram_quantile(0.99, aiops_fast_path_latency) > 0.1
+        
+  - name: insight_path_slo
+    rules:
+      - alert: InsightPathLatencyHigh
+        expr: histogram_quantile(0.99, aiops_insight_path_latency) > 5.0
+```
+
+2. **Add to docker-compose.yml**:
+```yaml
+vmalert:
+  image: victoriametrics/vmalert
+  command: ['-rule=/etc/vmalert/alerts.yml']
+  ports: ["8880:8880"]
+```
 
 ## Acceptance Criteria
-- [ ] VMAlert service configured in docker-compose
-- [ ] Fast Path SLO alerts defined
-- [ ] Insight Path SLO alerts defined
-- [ ] Alert rules validated
-- [ ] VMAlert UI accessible at http://localhost:8880
+- [ ] VMAlert in docker-compose
+- [ ] Alert rules defined
+- [ ] UI at http://localhost:8880
 
-## Dependencies
-- Issue #8 (services must be running to monitor)
-
-**Estimated Effort**: 2 hours  
-**Sprint**: 3 (Week 3)  
-**Priority**: Medium
+**Effort**: 2h | **Priority**: Medium | **Dependencies**: #8

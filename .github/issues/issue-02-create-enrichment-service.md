@@ -1,60 +1,41 @@
-## Objective
-Create new enrichment-service for Fast Path L1 enrichment with ClickHouse context lookups.
+## Task
+Create `services/enrichment-service/` for Fast Path L1 enrichment.
 
-## Service Purpose
-Subscribe to `anomaly.detected` NATS topic, enrich with historical context, publish to `anomaly.enriched`.
+## Implementation
 
-## Directory Structure
+1. **Service structure**:
 ```
 services/enrichment-service/
+├── enrichment_service.py  # Main service
+├── clickhouse_queries.py  # Context queries
 ├── Dockerfile
-├── requirements.txt
-├── enrichment_service.py
-├── clickhouse_queries.py
-├── config.yaml
-└── tests/
+└── requirements.txt
 ```
 
-## Core Functionality
+2. **Core logic**:
 ```python
 from aiops_core.models import AnomalyDetected, EnrichedAnomaly
 from aiops_core.utils import StructuredLogger
 
-# 1. Subscribe to NATS topic: anomaly.detected
-# 2. Enrich with ClickHouse context:
-#    - Historical failure rates
-#    - Device metadata
-#    - Recent similar anomalies
-# 3. Create EnrichedAnomaly model
-# 4. Publish to: anomaly.enriched
-# 5. Target latency: <30ms
+# Subscribe: anomaly.detected
+# Enrich with ClickHouse:
+#   - Device metadata
+#   - Historical failure rates (24h)
+#   - Similar anomalies (7d)
+# Publish: anomaly.enriched
 ```
 
-## ClickHouse Queries Needed
-- Device metadata lookup by device_id
-- Historical anomaly count (24h window)
-- Similar anomaly search (7d window)
-- Service health metrics
+3. **ClickHouse queries**:
+- Device metadata by device_id
+- Anomaly count (24h window)
+- Similar anomalies (7d window)
 
 ## Acceptance Criteria
-- [ ] Service subscribes to `anomaly.detected` NATS topic
-- [ ] ClickHouse context queries functional
+- [ ] Subscribes to `anomaly.detected`
+- [ ] ClickHouse queries work
 - [ ] Publishes `EnrichedAnomaly` to `anomaly.enriched`
-- [ ] Latency <30ms (99th percentile)
-- [ ] Error handling with fallback to basic enrichment
-- [ ] Health endpoint at `/health`
-- [ ] Metrics endpoint at `/metrics`
-- [ ] Unit tests with >90% coverage
+- [ ] Latency <30ms (p99)
+- [ ] `/health` and `/metrics` endpoints
+- [ ] Error fallback handling
 
-## Dependencies
-- Issue #1 (needs AnomalyDetected model definition)
-
-## Blocks
-- Issue #3 (correlation-service needs EnrichedAnomaly)
-
-## Reference
-See [V3_IMPLEMENTATION_GITHUB_ISSUES.md](../../V3_IMPLEMENTATION_GITHUB_ISSUES.md) for full context.
-
-**Estimated Effort**: 4-5 hours  
-**Sprint**: 1 (Week 1 - Critical Services)  
-**Priority**: Critical
+**Effort**: 4-5h | **Priority**: Critical | **Dependencies**: #1

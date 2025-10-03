@@ -1,21 +1,27 @@
-## Objective
-Remove ~100 legacy test files and redundant documentation to clean up the repository.
+## Task
+Remove ~100 legacy test and documentation files.
 
 ## Files to Remove
-- ~50 old test files (test_benthos_*, test_issue_*, validate_*, demo_*)
-- ~40 old documentation files (*_FIX_SUMMARY.md, *_ISSUE_REPORT*.md)
-- Archive important files to tests/legacy/ and docs/legacy/
+
+**Old tests** (~50 files):
+```bash
+rm test_benthos_*.py test_issue_*.py validate_*.py demo_*.py
+```
+
+**Old docs** (~40 files):
+```bash
+rm *_FIX_SUMMARY.md *_ISSUE_REPORT*.md
+```
+
+## Archive Strategy
+- Move important files to `tests/legacy/` and `docs/legacy/`
+- Update README.md references
 
 ## Acceptance Criteria
-- [ ] 50+ test files removed from root
-- [ ] 40+ summary files removed/archived
-- [ ] Important files preserved in legacy folders
-- [ ] README.md updated with new structure
-- [ ] No broken links in documentation
+- [ ] 50+ test files removed
+- [ ] 40+ doc files removed/archived
+- [ ] Important files preserved
+- [ ] README.md updated
+- [ ] No broken links
 
-## Dependencies
-- None (independent cleanup)
-
-**Estimated Effort**: 1 hour  
-**Sprint**: 4 (Week 4)  
-**Priority**: Low
+**Effort**: 1h | **Priority**: Low | **Dependencies**: None

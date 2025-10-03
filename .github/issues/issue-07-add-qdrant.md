@@ -1,21 +1,28 @@
-## Objective
-Add Qdrant vector database to docker-compose.yml and initialize incidents collection.
+## Task
+Add Qdrant vector database to `docker-compose.yml`.
 
-## Required Changes
-Add Qdrant service to `docker-compose.yml`.
-Create collection initialization script.
+## Changes
+
+1. **Add service**:
+```yaml
+qdrant:
+  image: qdrant/qdrant:latest
+  ports: ["6333:6333", "6334:6334"]
+  volumes: [qdrant_data:/qdrant/storage]
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+```
+
+2. **Init script** `scripts/init_qdrant.py`:
+```python
+from qdrant_client import QdrantClient
+client.create_collection("incidents", vectors_config=VectorParams(size=384))
+```
 
 ## Acceptance Criteria
-- [ ] Qdrant service added to docker-compose.yml
+- [ ] Service in docker-compose.yml
 - [ ] Collection "incidents" created
-- [ ] Health check passing
-- [ ] HTTP API accessible at http://localhost:6333
-- [ ] gRPC API accessible at localhost:6334
-- [ ] Initialization script created and tested
+- [ ] Health check passes
+- [ ] HTTP at http://localhost:6333
 
-## Dependencies
-- None (infrastructure component)
-
-**Estimated Effort**: 1 hour  
-**Sprint**: 2 (Week 2)  
-**Priority**: High
+**Effort**: 1h | **Priority**: High | **Dependencies**: None

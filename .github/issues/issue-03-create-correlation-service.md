@@ -1,63 +1,43 @@
-## Objective
-Create correlation-service for Fast Path incident formation with deduplication and time-windowing.
+## Task
+Create `services/correlation-service/` for incident formation with deduplication.
 
-## Service Purpose
-Subscribe to `anomaly.enriched`, apply correlation logic, form incidents, publish to `incidents.created`.
+## Implementation
 
-## Directory Structure
+1. **Service structure**:
 ```
 services/correlation-service/
+├── correlation_service.py  # Main logic
+├── deduplication.py       # Dedup logic
+├── windowing.py           # Time windows
 ├── Dockerfile
-├── requirements.txt
-├── correlation_service.py
-├── deduplication.py
-├── windowing.py
-├── config.yaml
-└── tests/
+└── requirements.txt
 ```
 
-## Core Functionality
+2. **Core logic**:
 ```python
 from aiops_core.models import EnrichedAnomaly, Incident
 from aiops_core.utils import StructuredLogger
 
-# 1. Subscribe to NATS topic: anomaly.enriched
-# 2. Apply correlation logic:
-#    - Time-window clustering (5min default)
-#    - Deduplication by signature
-#    - Severity aggregation
-#    - Root cause identification
-# 3. Form Incident model
-# 4. Publish to: incidents.created
-# 5. Target latency: <50ms
+# Subscribe: anomaly.enriched
+# Correlation logic:
+#   - Time-window clustering (5min default)
+#   - Deduplication by signature
+#   - Severity aggregation
+# Form Incident
+# Publish: incidents.created
 ```
 
-## Correlation Algorithms
-- Time-based windowing (configurable: 1m-30m)
+3. **Algorithms**:
+- Time-based windowing (1m-30m configurable)
 - Fingerprint-based deduplication
-- Related anomaly grouping
-- Suppression rules from policy system
+- Suppression rules from policy
 
 ## Acceptance Criteria
-- [ ] Service subscribes to `anomaly.enriched` NATS topic
-- [ ] Deduplication logic prevents duplicate incidents
-- [ ] Time-windowing clusters related anomalies
+- [ ] Subscribes to `anomaly.enriched`
+- [ ] Deduplication works
+- [ ] Time-windowing clusters anomalies
 - [ ] Publishes `Incident` to `incidents.created`
-- [ ] Latency <50ms (99th percentile)
-- [ ] Suppression rules applied from policy
-- [ ] Health endpoint at `/health`
-- [ ] Metrics endpoint at `/metrics`
-- [ ] Unit tests with >90% coverage
+- [ ] Latency <50ms (p99)
+- [ ] `/health` and `/metrics` endpoints
 
-## Dependencies
-- Issue #2 (needs EnrichedAnomaly model)
-
-## Blocks
-- Issue #4 (incident-api needs Incident model flowing)
-
-## Reference
-See [V3_IMPLEMENTATION_GITHUB_ISSUES.md](../../V3_IMPLEMENTATION_GITHUB_ISSUES.md) for full context.
-
-**Estimated Effort**: 4-5 hours  
-**Sprint**: 1 (Week 1 - Critical Services)  
-**Priority**: Critical
+**Effort**: 4-5h | **Priority**: Critical | **Dependencies**: #2

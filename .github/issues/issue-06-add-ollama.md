@@ -1,20 +1,27 @@
-## Objective
-Add Ollama LLM service to docker-compose.yml and initialize with phi3:mini model.
+## Task
+Add Ollama service to `docker-compose.yml`.
 
-## Required Changes
-Add Ollama service to `docker-compose.yml` with health checks and volume mounts.
-Create initialization script to pull phi3:mini model.
+## Changes
+
+1. **Add service**:
+```yaml
+ollama:
+  image: ollama/ollama:latest
+  ports: ["11434:11434"]
+  volumes: [ollama_data:/root/.ollama]
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+```
+
+2. **Init script** `scripts/init_ollama.sh`:
+```bash
+docker exec aiops-ollama ollama pull phi3:mini
+```
 
 ## Acceptance Criteria
-- [ ] Ollama service added to docker-compose.yml
-- [ ] phi3:mini model pulled and ready
-- [ ] Health check passing
-- [ ] API accessible at http://localhost:11434
-- [ ] Initialization script created and tested
+- [ ] Service in docker-compose.yml
+- [ ] phi3:mini model ready
+- [ ] Health check passes
+- [ ] API at http://localhost:11434
 
-## Dependencies
-- None (infrastructure component)
-
-**Estimated Effort**: 1 hour  
-**Sprint**: 2 (Week 2)  
-**Priority**: High
+**Effort**: 1h | **Priority**: High | **Dependencies**: None

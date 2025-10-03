@@ -1,22 +1,31 @@
-## Objective
-Create comprehensive end-to-end test suite validating Fast Path and Insight Path pipelines.
+## Task
+Create E2E test suite for V3 pipelines.
 
-## Test Structure
-- tests/v3/test_fast_path_e2e.py
-- tests/v3/test_insight_path_e2e.py
-- tests/v3/test_api_endpoints.py
+## Test Files
+
+```
+tests/v3/
+├── test_fast_path_e2e.py    # Log → Anomaly → Enrich → Correlate
+├── test_insight_path_e2e.py  # Incident → LLM → Enhanced
+└── test_api_endpoints.py     # V3 API tests
+```
+
+## Fast Path Test
+```python
+@pytest.mark.asyncio
+async def test_fast_path_e2e():
+    tracking_id = send_test_log(...)
+    anomaly = await wait_for("anomaly.detected", tracking_id)
+    enriched = await wait_for("anomaly.enriched", tracking_id)
+    incident = await wait_for("incidents.created", tracking_id)
+    assert latency < 100  # ms
+```
 
 ## Acceptance Criteria
-- [ ] Fast Path E2E test validates full pipeline
-- [ ] Insight Path E2E test validates LLM enrichment
-- [ ] SLO assertions in place (100ms, 5s)
-- [ ] Tests run in CI/CD pipeline
-- [ ] All tests passing
-- [ ] Test coverage >80% for V3 code
+- [ ] Fast Path test validates pipeline
+- [ ] Insight Path test validates LLM
+- [ ] SLO assertions (100ms, 5s)
+- [ ] All tests pass
+- [ ] Coverage >80%
 
-## Dependencies
-- Issues #1-11 (all services must be operational)
-
-**Estimated Effort**: 4 hours  
-**Sprint**: 4 (Week 4)  
-**Priority**: Low
+**Effort**: 4h | **Priority**: Low | **Dependencies**: #1-11

@@ -1,24 +1,31 @@
-## Objective
-Add all V3 services to main docker-compose.yml with proper dependencies and configuration.
+## Task
+Add all V3 services to `docker-compose.yml`.
 
 ## Services to Add
-- enrichment-service
-- correlation-service
-- llm-enricher
-- Merge Ollama and Qdrant from docker-compose.v3.yml
+
+```yaml
+enrichment-service:
+  build: ./services/enrichment-service
+  depends_on: [nats, clickhouse]
+  environment:
+    NATS_URL: nats://nats:4222
+    CLICKHOUSE_HOST: clickhouse
+
+correlation-service:
+  build: ./services/correlation-service
+  depends_on: [nats, enrichment-service]
+  
+llm-enricher:
+  build: ./services/llm-enricher
+  depends_on: [nats, ollama, qdrant, clickhouse]
+```
+
+Merge Ollama and Qdrant from docker-compose.v3.yml.
 
 ## Acceptance Criteria
-- [ ] All V3 services added to docker-compose.yml
-- [ ] Dependencies correctly configured
-- [ ] Environment variables set
-- [ ] Health checks defined for all services
-- [ ] `docker-compose up` starts all services successfully
-- [ ] Service startup order correct
+- [ ] All V3 services in docker-compose.yml
+- [ ] Dependencies correct
+- [ ] `docker-compose up` works
+- [ ] Service order correct
 
-## Dependencies
-- Issues #1, #2, #3, #4 (services must exist)
-- Issues #6, #7 (Ollama and Qdrant services)
-
-**Estimated Effort**: 2 hours  
-**Sprint**: 3 (Week 3)  
-**Priority**: Medium
+**Effort**: 2h | **Priority**: Medium | **Dependencies**: #1-7

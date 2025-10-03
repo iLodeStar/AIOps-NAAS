@@ -1,23 +1,28 @@
-## Objective
-Build the Grafana Operations Console plugin and create production-ready deployment package.
+## Task
+Build Grafana Operations Console plugin.
 
-## Build Process
-- npm install
-- npm run build
-- npm run build:prod
-- Manual testing in Grafana
+## Build Steps
+
+```bash
+cd grafana/plugins/aiops-ops-console
+npm install
+npm run build       # Development
+npm run build:prod  # Production
+```
+
+## Testing
+1. Copy plugin to Grafana plugins directory
+2. Restart Grafana
+3. Enable plugin in UI
+4. Test pages: Incidents, Approvals, Actions, Policy
+5. Verify API integration
 
 ## Acceptance Criteria
-- [ ] `npm install` completes without errors
-- [ ] `npm run build` produces dist/ artifacts
-- [ ] Plugin loads in Grafana without errors
-- [ ] All 4 pages render correctly
-- [ ] API calls to incident-api succeed
+- [ ] `npm install` succeeds
+- [ ] `npm run build` produces dist/
+- [ ] Plugin loads in Grafana
+- [ ] All 4 pages render
+- [ ] API calls work
 - [ ] No console errors
 
-## Dependencies
-- Issue #4 (needs incident-api V3 endpoints)
-
-**Estimated Effort**: 2 hours  
-**Sprint**: 4 (Week 4)  
-**Priority**: Low
+**Effort**: 2h | **Priority**: Low | **Dependencies**: #4

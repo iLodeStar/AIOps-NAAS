@@ -1,24 +1,33 @@
-## Objective
-Update all Python services to use StructuredLogger from aiops_core for consistent structured logging.
+## Task
+Migrate all services to use StructuredLogger.
 
-## Affected Services
+## Migration Pattern
+
+**Before**:
+```python
+import logging
+logger = logging.getLogger(__name__)
+logger.info("Processing anomaly")
+```
+
+**After**:
+```python
+from aiops_core.utils import StructuredLogger
+logger = StructuredLogger.get_logger(__name__, "service-name", "3.0.0")
+logger.info("processing_anomaly", tracking_id=tracking_id)
+```
+
+## Services to Update
 - services/anomaly-detection/
 - services/incident-api/
 - services/enrichment-service/
 - services/correlation-service/
 - services/llm-enricher/
-- All other Python services
 
 ## Acceptance Criteria
 - [ ] All services use StructuredLogger
-- [ ] Legacy logging.getLogger removed
-- [ ] All log statements include tracking_id
-- [ ] JSON log format validated
-- [ ] Grafana dashboards can parse structured logs
+- [ ] Legacy logging removed
+- [ ] All logs include tracking_id
+- [ ] JSON format validated
 
-## Dependencies
-- Issue #1 (StructuredLogger pattern established)
-
-**Estimated Effort**: 3 hours  
-**Sprint**: 3 (Week 3)  
-**Priority**: Medium
+**Effort**: 3h | **Priority**: Medium | **Dependencies**: #1
