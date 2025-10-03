@@ -158,6 +158,9 @@ class TestV3AnomalyDetection:
     
     def test_extract_ship_id(self, service):
         """Test ship_id extraction with various sources"""
+        # Mock the device_registry_client to return None
+        service.device_registry_client.lookup_hostname = Mock(return_value=None)
+        
         # Test direct ship_id
         log_data = {'ship_id': 'ship-direct'}
         assert service._extract_ship_id(log_data) == 'ship-direct'
@@ -173,6 +176,9 @@ class TestV3AnomalyDetection:
     
     def test_extract_device_id(self, service):
         """Test device_id extraction"""
+        # Mock the device_registry_client to return None
+        service.device_registry_client.lookup_hostname = Mock(return_value=None)
+        
         # Test direct device_id
         log_data = {'device_id': 'device-direct'}
         assert service._extract_device_id(log_data) == 'device-direct'
