@@ -13,7 +13,9 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from collections import defaultdict, deque
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 import uvicorn
 
@@ -54,8 +56,80 @@ PORT = int(os.getenv("CORRELATION_PORT", "8082"))
 # Configuration
 DEDUP_TTL = int(os.getenv("DEDUP_TTL", "900"))  # 15 min default
 CORRELATION_THRESHOLD = int(os.getenv("CORRELATION_THRESHOLD", "3"))  # 3 anomalies to trigger incident
+MAX_RECONNECT_ATTEMPTS = int(os.getenv("MAX_RECONNECT_ATTEMPTS", "5"))  # Circuit breaker threshold
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))  # Requests per minute
+RATE_LIMIT_WINDOW = 60  # seconds
 
-app = FastAPI(title="Correlation Service V3")
+class RateLimiter:
+    """Simple in-memory rate limiter for HTTP endpoints"""
+    
+    def __init__(self, max_requests: int, window_seconds: int):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: Dict[str, deque] = defaultdict(lambda: deque())
+    
+    def is_allowed(self, client_id: str) -> bool:
+        """Check if request is allowed for client"""
+        now = time.time()
+        client_requests = self.requests[client_id]
+        
+        # Remove expired requests
+        while client_requests and client_requests[0] < now - self.window_seconds:
+            client_requests.popleft()
+        
+        # Check if under limit
+        if len(client_requests) >= self.max_requests:
+            return False
+        
+        # Add new request
+        client_requests.append(now)
+        return True
+
+
+class CircuitBreaker:
+    """Circuit breaker for NATS connection failures"""
+    
+    def __init__(self, max_failures: int = 5, timeout_seconds: int = 60):
+        self.max_failures = max_failures
+        self.timeout_seconds = timeout_seconds
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "closed"  # closed, open, half_open
+    
+    def record_success(self):
+        """Record successful operation"""
+        self.failure_count = 0
+        self.state = "closed"
+    
+    def record_failure(self):
+        """Record failed operation"""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        
+        if self.failure_count >= self.max_failures:
+            self.state = "open"
+            logger.error(
+                "Circuit breaker opened",
+                failure_count=self.failure_count,
+                max_failures=self.max_failures
+            )
+    
+    def can_attempt(self) -> bool:
+        """Check if operation can be attempted"""
+        if self.state == "closed":
+            return True
+        
+        if self.state == "open":
+            # Check if timeout has passed
+            if time.time() - self.last_failure_time > self.timeout_seconds:
+                self.state = "half_open"
+                logger.info("Circuit breaker entering half-open state")
+                return True
+            return False
+        
+        # half_open state - allow one attempt
+        return True
+
 
 class CorrelationService:
     """
@@ -73,6 +147,9 @@ class CorrelationService:
         # Performance tracking - use deque for automatic bounds
         self.latency_samples = deque(maxlen=1000)  # Automatically maintains max size
         
+        # Circuit breaker for NATS connection
+        self.circuit_breaker = CircuitBreaker(max_failures=MAX_RECONNECT_ATTEMPTS)
+        
         # Statistics
         self.stats = {
             "processed": 0,
@@ -80,14 +157,29 @@ class CorrelationService:
             "duplicates_suppressed": 0,
             "errors": 0,
             "last_processing_time_ms": 0.0,
-            "avg_latency_ms": 0.0
+            "avg_latency_ms": 0.0,
+            "nats_failures": 0,
+            "circuit_breaker_state": "closed"
         }
         
     async def connect(self):
-        """Connect to NATS"""
-        self.nats = NATS()
-        await self.nats.connect(NATS_URL)
-        logger.info("Connected to NATS", nats_url=NATS_URL)
+        """Connect to NATS with circuit breaker"""
+        if not self.circuit_breaker.can_attempt():
+            logger.warning("Circuit breaker is open, skipping NATS connection attempt")
+            return False
+        
+        try:
+            self.nats = NATS()
+            await self.nats.connect(NATS_URL)
+            logger.info("Connected to NATS", nats_url=NATS_URL)
+            self.circuit_breaker.record_success()
+            return True
+        except Exception as e:
+            self.circuit_breaker.record_failure()
+            self.stats["nats_failures"] += 1
+            self.stats["circuit_breaker_state"] = self.circuit_breaker.state
+            logger.error(f"Failed to connect to NATS: {e}", error=e)
+            return False
         
     def _track_latency(self, latency_ms: float):
         """Track processing latency for metrics"""
@@ -393,25 +485,59 @@ class CorrelationService:
         """Stop correlation service"""
         self.running = False
         
-        if self.nats:
-            await self.nats.close()
+        if self.nats and hasattr(self.nats, '_transport') and self.nats._transport:
+            try:
+                await self.nats.close()
+            except Exception as e:
+                logger.warning(f"Error closing NATS connection: {e}")
         
         logger.info("Correlation service stopped")
 
 
 service = CorrelationService()
+rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW)
 
 
-@app.on_event("startup")
-async def startup():
-    """Application startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown"""
+    # Startup
+    logger.info("Starting Correlation Service V3")
     asyncio.create_task(service.start())
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Application shutdown"""
+    yield
+    # Shutdown
+    logger.info("Shutting down Correlation Service V3")
     await service.stop()
+
+
+app = FastAPI(title="Correlation Service V3", lifespan=lifespan)
+
+
+async def rate_limit_middleware(request: Request, call_next):
+    """Rate limiting middleware for HTTP endpoints"""
+    # Get client identifier (IP address)
+    client_id = request.client.host if request.client else "unknown"
+    
+    # Skip rate limiting for health checks
+    if request.url.path == "/health":
+        return await call_next(request)
+    
+    # Check rate limit
+    if not rate_limiter.is_allowed(client_id):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Rate limit exceeded",
+                "detail": f"Maximum {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW} seconds",
+                "client": client_id
+            }
+        )
+    
+    return await call_next(request)
+
+
+# Add middleware
+app.middleware("http")(rate_limit_middleware)
 
 
 @app.get("/health")
@@ -421,13 +547,15 @@ async def health():
     Returns service health status and basic stats
     """
     return {
-        "status": "healthy" if service.running else "unhealthy",
+        "status": "healthy" if service.running and service.circuit_breaker.state == "closed" else "degraded" if service.circuit_breaker.state == "half_open" else "unhealthy",
         "service": "correlation-service-v3",
         "version": "3.0",
         "nats": {
-            "connected": service.nats and service.nats.is_connected,
+            "connected": service.nats and service.nats.is_connected if service.nats else False,
             "input_topic": NATS_INPUT,
-            "output_topic": NATS_OUTPUT
+            "output_topic": NATS_OUTPUT,
+            "circuit_breaker": service.circuit_breaker.state,
+            "failures": service.stats.get("nats_failures", 0)
         },
         "stats": {
             "processed": service.stats["processed"],
@@ -437,7 +565,9 @@ async def health():
         },
         "config": {
             "dedup_ttl_seconds": DEDUP_TTL,
-            "correlation_threshold": CORRELATION_THRESHOLD
+            "correlation_threshold": CORRELATION_THRESHOLD,
+            "rate_limit": f"{RATE_LIMIT_REQUESTS} req/{RATE_LIMIT_WINDOW}s",
+            "max_reconnect_attempts": MAX_RECONNECT_ATTEMPTS
         }
     }
 

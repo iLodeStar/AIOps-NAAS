@@ -50,9 +50,11 @@ Enriched Anomaly → Time Window → Threshold Check → Deduplication → Incid
 
 ### Reliability Features
 - **NATS publish retry**: Exponential backoff with 3 retry attempts
+- **Circuit breaker**: Automatic NATS connection failure handling with configurable threshold
+- **Rate limiting**: HTTP endpoint protection (100 req/min default)
 - **Graceful error handling**: Comprehensive exception handling with structured logging
 - **Memory bounds**: Automatic size limits on latency tracking (collections.deque)
-- **Health monitoring**: Self-reporting health checks and metrics
+- **Health monitoring**: Self-reporting health checks with circuit breaker status
 
 ## Configuration
 
@@ -65,6 +67,8 @@ Enriched Anomaly → Time Window → Threshold Check → Deduplication → Incid
 | `CORRELATION_PORT` | `8082` | HTTP API port |
 | `DEDUP_TTL` | `900` | Deduplication TTL in seconds (15 minutes) |
 | `CORRELATION_THRESHOLD` | `3` | Number of anomalies to trigger incident |
+| `MAX_RECONNECT_ATTEMPTS` | `5` | Circuit breaker threshold for NATS failures |
+| `RATE_LIMIT_REQUESTS` | `100` | Maximum HTTP requests per minute |
 
 ## API Endpoints
 
@@ -84,7 +88,9 @@ Returns service health status, configuration, and basic stats.
   "nats": {
     "connected": true,
     "input_topic": "anomaly.enriched",
-    "output_topic": "incidents.created"
+    "output_topic": "incidents.created",
+    "circuit_breaker": "closed",
+    "failures": 0
   },
   "stats": {
     "processed": 1250,
@@ -94,7 +100,9 @@ Returns service health status, configuration, and basic stats.
   },
   "config": {
     "dedup_ttl_seconds": 900,
-    "correlation_threshold": 3
+    "correlation_threshold": 3,
+    "rate_limit": "100 req/60s",
+    "max_reconnect_attempts": 5
   }
 }
 ```
@@ -283,6 +291,7 @@ Key metrics to monitor:
 - Check `active_windows` count - too many windows can slow processing
 - Review `correlation_threshold` - lower threshold = faster incident creation
 - Check NATS connection - network latency impacts publish times
+- Monitor circuit breaker state - "open" indicates connection issues
 
 ### Too Many/Few Incidents
 - Adjust `CORRELATION_THRESHOLD` (lower = more incidents)
@@ -293,6 +302,17 @@ Key metrics to monitor:
 - Monitor `cache_size` in deduplication stats
 - Ensure cleanup tasks are running (check logs)
 - Consider reducing `DEDUP_TTL` if cache grows too large
+
+### Rate Limiting Issues
+- Adjust `RATE_LIMIT_REQUESTS` environment variable
+- Check client IP in rate limit errors
+- Health endpoint is exempt from rate limiting
+
+### Circuit Breaker Open
+- Check NATS server availability
+- Review `MAX_RECONNECT_ATTEMPTS` configuration
+- Monitor `nats_failures` metric
+- Circuit breaker auto-recovers after 60 seconds
 
 ## Dependencies
 
