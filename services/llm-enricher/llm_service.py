@@ -14,9 +14,9 @@ This service provides AI-based incident insights using LLM and RAG:
 """
 
 import asyncio
-import logging
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -30,12 +30,20 @@ from ollama_client import OllamaClient
 from qdrant_rag import QdrantRAGClient
 from llm_cache import LLMCache
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Try to import V3 StructuredLogger
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+    from aiops_core.utils import StructuredLogger, generate_tracking_id
+    logger = StructuredLogger(__name__)
+    V3_AVAILABLE = True
+except ImportError:
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+    V3_AVAILABLE = False
 
 
 class LLMEnricherService:
@@ -148,8 +156,13 @@ class LLMEnricherService:
         try:
             incident_data = json.loads(msg.data.decode())
             incident_id = incident_data.get('incident_id', 'unknown')
+            tracking_id = incident_data.get('tracking_id', 'unknown')
             
-            logger.info(f"Processing incident: {incident_id}")
+            # Set tracking_id in logger context for V3
+            if V3_AVAILABLE and hasattr(logger, 'set_tracking_id'):
+                logger.set_tracking_id(tracking_id)
+            
+            logger.info("processing_incident", incident_id=incident_id, tracking_id=tracking_id)
             self.health_status["incidents_processed"] += 1
             
             # Enrich the incident
@@ -160,7 +173,7 @@ class LLMEnricherService:
                 await self._publish_enriched_incident(enriched_data)
             
         except Exception as e:
-            logger.error(f"Error handling incident event: {e}")
+            logger.error("error_handling_incident", error=e)
             self.health_status["errors"] += 1
     
     async def enrich_incident(self, incident_data: Dict[str, Any]) -> Dict[str, Any]:

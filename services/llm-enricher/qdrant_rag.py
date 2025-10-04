@@ -4,13 +4,21 @@ Qdrant RAG Client for Similar Incident Retrieval
 Provides vector similarity search for finding related incidents
 """
 
-import logging
 import requests
+import hashlib
+import os
+import sys
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import hashlib
 
-logger = logging.getLogger(__name__)
+# Try to import V3 StructuredLogger
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+    from aiops_core.utils import StructuredLogger
+    logger = StructuredLogger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 
 class QdrantRAGClient:

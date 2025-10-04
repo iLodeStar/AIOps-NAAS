@@ -13,7 +13,12 @@ from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+# Try to import V3 StructuredLogger
+try:
+    from aiops_core.utils import StructuredLogger
+    logger = StructuredLogger(__name__)
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Models

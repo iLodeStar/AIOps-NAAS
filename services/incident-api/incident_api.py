@@ -46,7 +46,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
+
+# Use StructuredLogger if V3 available, fallback to standard logger
+if V3_AVAILABLE:
+    logger = StructuredLogger(__name__)
+else:
+    logger = logging.getLogger(__name__)
 
 # Pydantic models for API
 class TimelineEntry(BaseModel):

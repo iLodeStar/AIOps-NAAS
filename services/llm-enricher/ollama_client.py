@@ -4,12 +4,20 @@ Ollama LLM Client for Incident Enrichment
 Provides integration with Ollama API for generating AI insights
 """
 
-import logging
 import requests
+import os
+import sys
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Try to import V3 StructuredLogger
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+    from aiops_core.utils import StructuredLogger
+    logger = StructuredLogger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 
 class OllamaClient:
