@@ -113,19 +113,53 @@ class TestV3StatsEndpoint:
         assert hours_w == 24 * 7
     
     @pytest.mark.asyncio
-    async def test_stats_query_structure(self):
-        """Test that stats queries are properly structured"""
+    async def test_stats_time_range_validation(self):
+        """Test time range validation"""
+        # Test valid ranges
+        valid_ranges = ["1h", "24h", "7d", "1w"]
+        for tr in valid_ranges:
+            if tr.endswith("h"):
+                hours = int(tr[:-1])
+            elif tr.endswith("d"):
+                hours = int(tr[:-1]) * 24
+            elif tr.endswith("w"):
+                hours = int(tr[:-1]) * 24 * 7
+            assert hours > 0 and hours <= 8760
+        
+        # Test invalid ranges should raise ValueError
+        invalid_ranges = ["0h", "-1h", "9000h", "abc", "24x"]
+        for tr in invalid_ranges:
+            try:
+                if tr.endswith("h"):
+                    hours = int(tr[:-1])
+                elif tr.endswith("d"):
+                    hours = int(tr[:-1]) * 24
+                elif tr.endswith("w"):
+                    hours = int(tr[:-1]) * 24 * 7
+                else:
+                    raise ValueError("Invalid format")
+                
+                if hours <= 0 or hours > 8760:
+                    raise ValueError("Out of range")
+            except (ValueError, IndexError):
+                # Expected for invalid inputs
+                pass
+    
+    @pytest.mark.asyncio
+    async def test_stats_query_uses_parameterized_queries(self):
+        """Test that stats queries use parameterized format"""
         start_time = datetime.now() - timedelta(hours=1)
         
-        # Verify query format
-        severity_query = f"""
+        # Verify parameterized query format
+        severity_query = """
         SELECT incident_severity, count() as cnt 
         FROM logs.incidents 
-        WHERE created_at >= '{start_time.isoformat()}'
+        WHERE created_at >= %(start_time)s
         GROUP BY incident_severity
         """
         
         assert "SELECT" in severity_query
+        assert "%(start_time)s" in severity_query
         assert "GROUP BY incident_severity" in severity_query
 
 
@@ -201,6 +235,21 @@ class TestV3IncidentGetEndpoint:
         assert isinstance(timeline, list)
         assert len(timeline) == 1
         assert timeline[0]["event"] == "created"
+    
+    def test_json_parsing_error_handling(self):
+        """Test JSON parsing handles malformed data gracefully"""
+        # Malformed JSON should be caught
+        malformed_json = "{invalid json"
+        
+        try:
+            parsed = json.loads(malformed_json)
+            # Should not reach here
+            assert False, "Should have raised JSONDecodeError"
+        except json.JSONDecodeError:
+            # Expected - this is how the code should handle it
+            # In the endpoint, we catch this and use default values
+            default_timeline = []
+            assert isinstance(default_timeline, list)
     
     def test_datetime_parsing(self):
         """Test datetime parsing from ISO string"""

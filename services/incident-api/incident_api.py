@@ -776,83 +776,100 @@ async def get_v3_stats(time_range: str = Query("1h", description="Time window (e
     logger.info(f"V3 Stats request - time_range: {time_range}, tracking_id: {tracking_id}")
     
     try:
-        # Parse time range to hours
+        # Parse and validate time range
         hours = 1
-        if time_range.endswith("h"):
-            hours = int(time_range[:-1])
-        elif time_range.endswith("d"):
-            hours = int(time_range[:-1]) * 24
-        elif time_range.endswith("w"):
-            hours = int(time_range[:-1]) * 24 * 7
+        try:
+            if time_range.endswith("h"):
+                hours = int(time_range[:-1])
+            elif time_range.endswith("d"):
+                hours = int(time_range[:-1]) * 24
+            elif time_range.endswith("w"):
+                hours = int(time_range[:-1]) * 24 * 7
+            else:
+                raise ValueError(f"Invalid time_range format: {time_range}")
+            
+            # Validate range (max 1 year)
+            if hours <= 0 or hours > 8760:
+                raise ValueError(f"time_range must be between 1h and 8760h (1 year)")
+        except (ValueError, IndexError) as e:
+            logger.error(f"Invalid time_range parameter: {time_range}, error: {e}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid time_range format. Use format like '1h', '24h', '7d', '1w'. Error: {str(e)}"
+            )
         
         start_time = datetime.now() - timedelta(hours=hours)
         
-        # Query incidents by severity
-        severity_query = f"""
+        # Query incidents by severity using parameterized query
+        severity_query = """
         SELECT incident_severity, count() as cnt 
         FROM logs.incidents 
-        WHERE created_at >= '{start_time.isoformat()}'
+        WHERE created_at >= %(start_time)s
         GROUP BY incident_severity
         """
         
         incidents_by_severity = {}
         try:
-            results = service.clickhouse_client.execute(severity_query)
+            results = service.clickhouse_client.execute(severity_query, {'start_time': start_time})
             for severity, cnt in results:
                 incidents_by_severity[severity] = cnt
         except Exception as e:
-            logger.error(f"Error querying by severity: {e}")
+            logger.error(f"Error querying by severity: {e}, tracking_id: {tracking_id}")
             incidents_by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         
-        # Query incidents by status
-        status_query = f"""
+        # Query incidents by status using parameterized query
+        status_query = """
         SELECT status, count() as cnt 
         FROM logs.incidents 
-        WHERE created_at >= '{start_time.isoformat()}'
+        WHERE created_at >= %(start_time)s
         GROUP BY status
         """
         
         incidents_by_status = {}
         try:
-            results = service.clickhouse_client.execute(status_query)
+            results = service.clickhouse_client.execute(status_query, {'start_time': start_time})
             for status, cnt in results:
                 incidents_by_status[status] = cnt
         except Exception as e:
-            logger.error(f"Error querying by status: {e}")
+            logger.error(f"Error querying by status: {e}, tracking_id: {tracking_id}")
             incidents_by_status = {"open": 0, "ack": 0, "resolved": 0}
         
-        # Query incidents by type (category)
-        category_query = f"""
+        # Query incidents by type (category) using parameterized query
+        category_query = """
         SELECT incident_type, count() as cnt 
         FROM logs.incidents 
-        WHERE created_at >= '{start_time.isoformat()}'
+        WHERE created_at >= %(start_time)s
         GROUP BY incident_type
         """
         
         incidents_by_category = {}
         try:
-            results = service.clickhouse_client.execute(category_query)
+            results = service.clickhouse_client.execute(category_query, {'start_time': start_time})
             for category, cnt in results:
                 incidents_by_category[category] = cnt
         except Exception as e:
-            logger.error(f"Error querying by category: {e}")
+            logger.error(f"Error querying by category: {e}, tracking_id: {tracking_id}")
             incidents_by_category = {}
         
         # Processing metrics (fast/insight path)
+        # Note: These are calculated estimates based on available data
         processing_metrics = {
             "fast_path_count": sum(incidents_by_severity.values()) if incidents_by_severity else 0,
             "insight_path_count": 0,  # Would need separate tracking
-            "avg_processing_time_ms": 150.5,  # Mock - would calculate from timeline data
-            "cache_hit_rate": 0.85  # Mock - would track LLM cache hits
+            "avg_processing_time_ms": None,  # Not available - would calculate from timeline data
+            "cache_hit_rate": None,  # Not available - would track LLM cache hits
+            "note": "avg_processing_time_ms and cache_hit_rate require additional instrumentation"
         }
         
         # SLO compliance (latency percentiles)
+        # Note: These are estimates - real implementation would query from performance metrics
         slo_compliance = {
-            "p50_latency_ms": 125.0,  # Mock - would calculate from actual data
-            "p95_latency_ms": 450.0,  # Mock
-            "p99_latency_ms": 850.0,  # Mock
+            "p50_latency_ms": None,  # Not available - would calculate from actual data
+            "p95_latency_ms": None,  # Not available
+            "p99_latency_ms": None,  # Not available
             "slo_target_ms": 1000.0,
-            "compliance_rate": 0.98  # 98% within SLO
+            "compliance_rate": None,  # Not available
+            "note": "Latency percentiles require performance metrics collection"
         }
         
         return V3StatsResponse(
@@ -865,8 +882,11 @@ async def get_v3_stats(time_range: str = Query("1h", description="Time window (e
             slo_compliance=slo_compliance
         )
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors)
+        raise
     except Exception as e:
-        logger.error(f"Error in V3 stats endpoint: {e}")
+        logger.error(f"Error in V3 stats endpoint: {e}, tracking_id: {tracking_id}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}")
 
 
@@ -1075,22 +1095,38 @@ async def get_v3_incident(incident_id: str):
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
         
-        # Parse JSON fields
-        timeline = incident.get('timeline', [])
-        if isinstance(timeline, str):
-            timeline = json.loads(timeline)
+        # Parse JSON fields with error handling
+        try:
+            timeline = incident.get('timeline', [])
+            if isinstance(timeline, str):
+                timeline = json.loads(timeline)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse timeline JSON for incident {incident_id}: {e}")
+            timeline = []
         
-        correlated_events = incident.get('correlated_events', [])
-        if isinstance(correlated_events, str):
-            correlated_events = json.loads(correlated_events)
+        try:
+            correlated_events = incident.get('correlated_events', [])
+            if isinstance(correlated_events, str):
+                correlated_events = json.loads(correlated_events)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse correlated_events JSON for incident {incident_id}: {e}")
+            correlated_events = []
         
-        suggested_runbooks = incident.get('suggested_runbooks', [])
-        if isinstance(suggested_runbooks, str):
-            suggested_runbooks = json.loads(suggested_runbooks)
+        try:
+            suggested_runbooks = incident.get('suggested_runbooks', [])
+            if isinstance(suggested_runbooks, str):
+                suggested_runbooks = json.loads(suggested_runbooks)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse suggested_runbooks JSON for incident {incident_id}: {e}")
+            suggested_runbooks = []
         
-        metadata = incident.get('metadata', {})
-        if isinstance(metadata, str):
-            metadata = json.loads(metadata)
+        try:
+            metadata = incident.get('metadata', {})
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse metadata JSON for incident {incident_id}: {e}")
+            metadata = {}
         
         # Extract tracking_id from metadata if available
         tracking_id = metadata.get('tracking_id') if isinstance(metadata, dict) else None
