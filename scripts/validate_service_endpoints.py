@@ -78,6 +78,11 @@ class ServiceEndpointValidator:
                 "http://localhost:8081/devices"
             ]),
             
+            # V3 Services - Fast Path Enrichment and Correlation
+            ServiceEndpoint("Enrichment Service", 8092, 8085, "http://localhost:8092/health", []),
+            ServiceEndpoint("Correlation Service", 8093, 8082, "http://localhost:8093/health", []),
+            ServiceEndpoint("LLM Enricher", 9090, 9090, "http://localhost:9090/health", []),
+            
             # v0.3 Services
             ServiceEndpoint("Link Health", 8082, 8082, "http://localhost:8082/health", []),
             ServiceEndpoint("Remediation", 8083, 8083, "http://localhost:8083/health", []),
@@ -269,10 +274,13 @@ class ServiceEndpointValidator:
 - Data Flow Visualization: 8089
 - Onboarding Service: 8090
 - Application Log Collector: 8091 → 8090 (container)
+- Enrichment Service (V3): 8092 → 8085 (container)
+- Correlation Service (V3): 8093 → 8082 (container)
 - Enhanced Anomaly Detection: 9082
 
 ## API Services (9080-9099)
 - Incident API: 9081
+- LLM Enricher (V3): 9090
 
 ## Monitoring & Alerting
 - Node Exporter: 9100
