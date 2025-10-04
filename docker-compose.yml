@@ -257,9 +257,11 @@ services:
     ports:
       - "8880:8880"
     volumes:
-      - ./alerts/system-alerts.yml:/etc/alerts/alerts.yml:ro
+      - ./alerts/system-alerts.yml:/etc/alerts/system-alerts.yml:ro
+      - ./vmalert/alerts.yml:/etc/alerts/slo-alerts.yml:ro
     command:
-      - --rule=/etc/alerts/alerts.yml
+      - --rule=/etc/alerts/system-alerts.yml
+      - --rule=/etc/alerts/slo-alerts.yml
       - --datasource.url=http://victoria-metrics:8428
       - --notifier.url=http://alertmanager:9093
       - --httpListenAddr=:8880

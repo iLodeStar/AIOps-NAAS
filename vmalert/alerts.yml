@@ -1,0 +1,28 @@
+groups:
+  - name: fast_path_slo
+    interval: 30s
+    rules:
+      - alert: FastPathLatencyHigh
+        expr: histogram_quantile(0.99, aiops_fast_path_latency) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: fast_path
+          slo: latency
+        annotations:
+          summary: "Fast Path P99 latency exceeds SLO"
+          description: "Fast Path P99 latency is above 100ms SLO threshold. Current value: {{ $value }}s"
+        
+  - name: insight_path_slo
+    interval: 30s
+    rules:
+      - alert: InsightPathLatencyHigh
+        expr: histogram_quantile(0.99, aiops_insight_path_latency) > 5.0
+        for: 2m
+        labels:
+          severity: warning
+          service: insight_path
+          slo: latency
+        annotations:
+          summary: "Insight Path P99 latency exceeds SLO"
+          description: "Insight Path P99 latency is above 5s SLO threshold. Current value: {{ $value }}s"
