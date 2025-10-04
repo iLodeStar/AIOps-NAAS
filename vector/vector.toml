@@ -149,12 +149,44 @@ if exists(.thread) { .labels.thread = .thread }
 # ----------------------
 # V3: Add tracking_id to all logs
 # ----------------------
-[transforms.add_tracking_id]
+[transforms.add_tracking_id_syslog]
 type = "remap"
 inputs = ["syslog_for_logs"]
 source = '''
   .tracking_id = uuid_v4()
-  .ingestion_timestamp = now()
+  .ingestion_timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+[transforms.add_tracking_id_file]
+type = "remap"
+inputs = ["file_logs_processed"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+[transforms.add_tracking_id_snmp]
+type = "remap"
+inputs = ["snmp_for_logs"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+[transforms.add_tracking_id_app]
+type = "remap"
+inputs = ["app_logs_for_logs"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
+'''
+
+[transforms.add_tracking_id_metrics]
+type = "remap"
+inputs = ["format_for_clickhouse"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 '''
 
 # ----------------------
@@ -162,7 +194,7 @@ source = '''
 # ----------------------
 [transforms.anomalous_logs_filter]
 type = "filter"
-inputs = ["add_tracking_id", "app_logs_for_logs"]
+inputs = ["add_tracking_id_syslog", "add_tracking_id_app"]
 condition = '''
 exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
 exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
@@ -177,8 +209,9 @@ source = '''
 .anomaly_detected_at = format_timestamp!(now(), "%Y-%m-%d %H:%M:%S%.3f")
 .anomaly_source = "vector_log_filter"
 
+# Preserve the UUID tracking_id, extract test IDs separately
 .matched = match(to_string!(.message), r'(TEST-[0-9]{8}-[0-9]{6}-[a-f0-9]+|E2E-[0-9]{8}-[0-9]{6}-[a-f0-9]+)')
-.tracking_id = if .matched != null { .matched[0] } else { null }
+.test_id = if .matched != null { .matched[0] } else { null }
 
 .anomaly_severity = if exists(.severity) {
   if (.severity == "emerg" || .severity == "alert" || .severity == "crit") {
@@ -210,7 +243,7 @@ source = '''
 # ----------------------
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["format_for_clickhouse", "add_tracking_id", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
+inputs = ["add_tracking_id_metrics", "add_tracking_id_syslog", "add_tracking_id_file", "add_tracking_id_snmp", "add_tracking_id_app"]
 endpoint = "http://clickhouse:8123"
 database = "logs"
 table = "raw"
@@ -237,25 +270,25 @@ codec = "json"
 # ----------------------
 [sinks.syslog_debug]
 type = "console"
-inputs = ["add_tracking_id"]
+inputs = ["add_tracking_id_syslog"]
 [sinks.syslog_debug.encoding]
 codec = "json"
 
 [sinks.file_debug]
 type = "console"
-inputs = ["file_logs_processed"]
+inputs = ["add_tracking_id_file"]
 [sinks.file_debug.encoding]
 codec = "json"
 
 [sinks.snmp_debug]
 type = "console"
-inputs = ["snmp_for_logs"]
+inputs = ["add_tracking_id_snmp"]
 [sinks.snmp_debug.encoding]
 codec = "json"
 
 [sinks.transform_debug]
 type = "console"
-inputs = ["format_for_clickhouse"]
+inputs = ["add_tracking_id_metrics"]
 [sinks.transform_debug.encoding]
 codec = "json"
 
