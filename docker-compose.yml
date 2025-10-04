@@ -484,6 +484,46 @@ services:
         max-file: "3"
         max-size: "10m"
 
+  # LLM Enricher Service - AI-based incident insights
+  llm-enricher:
+    build:
+      context: ./services/llm-enricher
+      dockerfile: Dockerfile
+    container_name: aiops-llm-enricher
+    ports:
+      - "9090:9090"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-admin}
+      - NATS_URL=nats://nats:4222
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-phi3:mini}
+      - OLLAMA_TIMEOUT=10
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_TIMEOUT=5
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
   # v0.3 Services - Predictive Link Health + Guarded Auto-Remediation
 
   # Link Health Service - Predictive satellite link degradation
