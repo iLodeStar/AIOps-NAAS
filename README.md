@@ -296,9 +296,6 @@ For complete testing procedures, see **[Test Plan](docs/testing/test-plan.md)**.
 # Run component tests
 python tests/v1.0/test_simple.py
 
-# Experience full system demo  
-python demo_v1.0.py
-
 # Deploy to Kubernetes
 kubectl apply -f deployments/v1.0/orchestrator.yaml
 
