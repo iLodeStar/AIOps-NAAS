@@ -106,8 +106,10 @@ The modular event processing pipeline is the heart of the AIOps platform:
 ### Testing Documentation
 
 - **[Manual Testing Guide](validation/manual-testing-guide.md)** - Step-by-step validation
-- **[Testing Documentation Summary](../TESTING_DOCUMENTATION_SUMMARY.md)** - All test suites
 - [Testing Directory](testing/) - Test specifications and procedures
+- [CI/CD Pipeline](ci-cd-pipeline.md) - Automated testing and deployment
+
+**Note**: Historical testing guides have been archived. See current tests in `/tests/` directory.
 
 ### Validation Scripts
 
@@ -119,10 +121,9 @@ Located in `scripts/`:
 
 ### Test Results & Reports
 
-Located in repository root:
-- [Comprehensive End-to-End Validation](../COMPREHENSIVE_END_TO_END_VALIDATION.md)
-- [Comprehensive Step-by-Step Testing Guide](../COMPREHENSIVE_STEP_BY_STEP_TESTING_GUIDE.md)
-- [Enhanced Comprehensive Testing Guide](../ENHANCED_COMPREHENSIVE_TESTING_GUIDE.md)
+Located in repository root and test directories:
+- Test results are generated in `/tests/` and archived appropriately
+- Historical validation reports archived in `docs/legacy/`
 
 ## 🔄 Operations & Maintenance
 
@@ -143,24 +144,19 @@ Located in `docs/admin/`:
 
 Complete implementation documentation:
 
-- [Onboarding Service Complete](../ONBOARDING_SERVICE_COMPLETE.md) - Service implementation
-- [V03 Implementation Summary](../V03_IMPLEMENTATION_SUMMARY.md) - v0.3 features
-- [End-to-End Implementation](../END_TO_END_IMPLEMENTATION.md) - Complete system
-- [Complete User-Friendly Correlation Solution](../COMPLETE_USER_FRIENDLY_CORRELATION_SOLUTION.md)
-- [Comprehensive Data Flow Architecture](../COMPREHENSIVE_DATA_FLOW_ARCHITECTURE.md)
+- [Complete User-Friendly Correlation Solution](legacy/COMPLETE_USER_FRIENDLY_CORRELATION_SOLUTION.md) - Archived
+- [Comprehensive Data Flow Architecture](legacy/COMPREHENSIVE_DATA_FLOW_ARCHITECTURE.md) - Archived
+- [End-to-End Implementation](legacy/END_TO_END_IMPLEMENTATION.md) - Archived
+
+**Note**: Implementation summaries have been archived to `docs/legacy/` as they document completed work. See `docs/legacy/README.md` for the complete archive.
 
 ## 🐛 Troubleshooting & Fixes
 
-### Fix Documentation
+### Current Troubleshooting Guides
 
-- [One-Click Debugging Implementation](../ONE_CLICK_DEBUGGING_IMPLEMENTATION_SUMMARY.md)
-- [One-Click Incident Debugging](../ONE_CLICK_INCIDENT_DEBUGGING_README.md)
-- [Critical Fixes Documentation](../) - Multiple fix summaries in root
+- [Incident Data Debugging Guide](incident-data-debugging-guide.md)
 
-### Issue Reports
-
-- [Incident Data Debugging](incident-data-debugging-guide.md)
-- [Firewall and Port Validation Report](../firewall_and_port_validation_report.md)
+**Note**: Historical fix documentation has been archived to `docs/legacy/`. See `docs/legacy/README.md` for fix summaries and issue reports.
 
 ## 📊 Quick Reference Tables
 
