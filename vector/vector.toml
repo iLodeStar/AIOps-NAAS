@@ -147,11 +147,22 @@ if exists(.thread) { .labels.thread = .thread }
 '''
 
 # ----------------------
+# V3: Add tracking_id to all logs
+# ----------------------
+[transforms.add_tracking_id]
+type = "remap"
+inputs = ["syslog_for_logs"]
+source = '''
+  .tracking_id = uuid_v4()
+  .ingestion_timestamp = now()
+'''
+
+# ----------------------
 # Anomaly detection
 # ----------------------
 [transforms.anomalous_logs_filter]
 type = "filter"
-inputs = ["syslog_for_logs", "app_logs_for_logs"]
+inputs = ["add_tracking_id", "app_logs_for_logs"]
 condition = '''
 exists(.severity) && (.severity == "err" || .severity == "crit" || .severity == "alert" || .severity == "emerg") ||
 exists(.level) && (.level == "ERROR" || .level == "CRITICAL" || .level == "FATAL") ||
@@ -199,7 +210,7 @@ source = '''
 # ----------------------
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["format_for_clickhouse", "syslog_for_logs", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
+inputs = ["format_for_clickhouse", "add_tracking_id", "file_logs_processed", "snmp_for_logs", "app_logs_for_logs"]
 endpoint = "http://clickhouse:8123"
 database = "logs"
 table = "raw"
@@ -226,7 +237,7 @@ codec = "json"
 # ----------------------
 [sinks.syslog_debug]
 type = "console"
-inputs = ["syslog_for_logs"]
+inputs = ["add_tracking_id"]
 [sinks.syslog_debug.encoding]
 codec = "json"
 
